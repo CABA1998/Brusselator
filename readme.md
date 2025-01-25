@@ -10,35 +10,35 @@ over time and space.
 
 The Brusselator system is governed by the following equations:
 
-$$
+```math
 \frac{\partial U}{\partial t} = D_U \nabla^2 U + A + U^2 V - (B + 1) U
-$$
+```
 
-$$
+```math
 \frac{\partial V}{\partial t} = D_V \nabla^2 V + B U - U^2 V
-$$
+```
 
 Where:
 
-- $U(t, \bold x)$ and $V(t, \bold x)$ represent the concentrations of the two 
-chemical species at time $t$ and position $\bold x$,
+- $U(t, X)$ and $V(t, X)$ represent the concentrations of the two 
+chemical species at time $t$ and position $X$,
 - $D_U$ and $D_V$ are the diffusion coefficients of $U$ and $V$, respectively,
 - $A$ and $B$ are constants that define the system's behavior.
 
 The system is solved over the domain $\Omega = [0, 1]^2$, where 
-$\bold x \in \Omega$ and $t \in [0, T_{\text{max}}]$, with the 
+$X \in \Omega$ and $t \in [0, T_{\text{max}}]$, with the 
 following initial conditions:
 
-$$
-U(\bold x, 0) = U_0(\bold x), \quad V(\bold x, 0) = V_0(\bold x)
-$$
+```math
+U(X, 0) = U_0(X), \quad V(X, 0) = V_0(X)
+```
 
 The system is subject to Dirichlet boundary conditions:
 
-$$
-U(\bold x, t) \Big|_{\partial \Omega} = U_0(\bold x) \Big|_{\partial \Omega}, 
-    \quad V(\bold x, t) \Big|_{\partial \Omega} = V_0(\bold x) \Big|_{\partial \Omega}
-$$
+```math
+U(X, t) \Big|_{\partial \Omega} = U_0(X) \Big|_{\partial \Omega}, 
+    \quad V(X, t) \Big|_{\partial \Omega} = V_0(X) \Big|_{\partial \Omega}
+```
 
 Where $\partial \Omega$ denotes the boundary of the domain $\Omega$.
 
