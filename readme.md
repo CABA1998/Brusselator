@@ -1,6 +1,10 @@
 
 # Brusselator System Simulation
 
+**Interactive simulations:** [brusselator.carlosb.dev](https://brusselator.carlosb.dev/) shows, step by step,
+how this solver runs on a GPU ([CUDA Machine](https://brusselator.carlosb.dev/cuda.html)) and on a
+multicore CPU ([OpenMP Machine](https://brusselator.carlosb.dev/openmp.html)). Their source is in [`web/`](web/).
+
 This project simulates a Brusselator system. 
 The system consists of two coupled partial differential equations 
 that describe the evolution of two chemical species, $U$ and $V$, 
@@ -88,6 +92,19 @@ The number of threads for parallel execution is set to:
 This value can be adjusted in **`include/config.h`** to match the desired 
 level of parallelism based on your hardware capabilities.
 
+### CUDA version
+
+[`cuda/brusselator.cu`](cuda/brusselator.cu) solves the same system on an NVIDIA GPU, with one GPU
+thread per grid node. It reuses `include/config.h` and `src/io.cpp`, keeps all time steps on the GPU,
+and copies the data only at the start and at the end. The file is commented as a learning guide.
+
+Requirements: the CUDA Toolkit (`nvcc`) and an NVIDIA GPU.
+
+```bash
+make cuda-verify   # run 100 steps on CPU and GPU and print the largest difference
+make cuda-run      # full simulation, writes output/uf_cuda.dat and output/vf_cuda.dat
+```
+
 
 ## Plot results
 
@@ -100,6 +117,7 @@ To visualize the simulation results, a Python script is provided.
 
 - g++-14 or later
 - OpenMP (for parallelization)
+- Optional: CUDA Toolkit, for the GPU version
 
 #### Building the project
 

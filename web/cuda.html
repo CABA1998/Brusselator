@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Interactive step-by-step simulation of the Brusselator CUDA kernel on a toy GPU.">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>CUDA Machine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* Layout: control strip on top; machine diagram + explanation side by side; then the thread grid + inspector beside the source code. */
+:root{
+  --bg:#ECEEF2; --surface:#FFFFFF; --surface2:#F4F5F8; --ink:#161B26; --muted:#5A6373; --line:#D2D7E0;
+  --host:#B4581F; --host-soft:#F4E3D7; --dev:#3550C8; --dev-soft:#DEE4FA;
+  --w0:#3550C8; --w1:#B4581F; --w2:#13866A; --w3:#9B3FB0;
+  --heat0:#16213D; --heat1:#4166D8; --heat2:#F2B544;
+  --codebg:#F7F8FB; --hl:#E6EBFB;
+  --display:"Chakra Petch","Segoe UI",system-ui,sans-serif;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,"Courier New",monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0E1117; --surface:#161A22; --surface2:#1C212B; --ink:#E5E8EE; --muted:#959DAC; --line:#2C323D;
+  --host:#E58B52; --host-soft:#3B281C; --dev:#7F95FF; --dev-soft:#1F2749;
+  --w0:#7F95FF; --w1:#E58B52; --w2:#3DC59E; --w3:#CF7BE3;
+  --heat0:#0A0F1E; --heat1:#3F63D6; --heat2:#F7C766;
+  --codebg:#12161D; --hl:#1F2847; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0E1117; --surface:#161A22; --surface2:#1C212B; --ink:#E5E8EE; --muted:#959DAC; --line:#2C323D;
+  --host:#E58B52; --host-soft:#3B281C; --dev:#7F95FF; --dev-soft:#1F2749;
+  --w0:#7F95FF; --w1:#E58B52; --w2:#3DC59E; --w3:#CF7BE3;
+  --heat0:#0A0F1E; --heat1:#3F63D6; --heat2:#F7C766;
+  --codebg:#12161D; --hl:#1F2847; color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55}
+.wrap{max-width:1380px;margin:0 auto;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--dev);outline-offset:2px}
+code{font-family:var(--mono);font-size:.9em;background:var(--surface2);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+
+.top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:12px}
+.brand h1{font-family:var(--display);font-weight:700;font-size:clamp(26px,4vw,36px);letter-spacing:.02em;margin:0;line-height:1.1}
+.brand h1 span{color:var(--dev)}
+.brand p{margin:2px 0 0;color:var(--muted)}
+.hdr-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pill{font-family:var(--mono);font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted)}
+.ghost{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:14px}
+.ghost:hover{border-color:var(--dev)}
+
+.controls{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+.transport{display:flex;gap:6px;align-items:center}
+.tbtn{min-width:40px;height:36px;border-radius:8px;border:1px solid var(--line);background:var(--surface2);cursor:pointer;font-size:14px}
+.tbtn:hover{border-color:var(--dev)}
+.primary{background:var(--dev);border-color:var(--dev);color:#fff;font-weight:600;padding:0 18px;min-width:96px}
+.primary:hover{filter:brightness(1.08)}
+.counter{font-family:var(--mono);font-size:13px;color:var(--muted);min-width:64px;text-align:center;font-variant-numeric:tabular-nums}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:var(--surface2);padding:6px 10px;cursor:pointer;font-family:var(--mono);font-size:13px;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--dev);color:#fff}
+.ctl-label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-right:6px}
+.group{display:flex;align-items:center}
+.opts{position:relative}
+.opts summary{cursor:pointer;list-style:none;padding:6px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface2);font-size:14px}
+.opts summary::-webkit-details-marker{display:none}
+.opts[open] summary{border-color:var(--dev)}
+.opts-body{display:flex;flex-direction:column;gap:12px;padding:12px 0 2px}
+.opts-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.hint{font-size:13px;color:var(--muted);margin:0;max-width:60ch}
+.check{display:flex;gap:8px;align-items:center;cursor:pointer;font-size:14px}
+
+.rail{display:flex;gap:4px;flex-wrap:wrap}
+.rail button{flex:1 1 0;min-width:22px;height:8px;border:0;border-radius:4px;background:var(--line);cursor:pointer;padding:0}
+.rail button.done{background:var(--dev-soft)}
+.rail button.cur{background:var(--dev)}
+
+.gloss{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px 22px}
+.gloss h3{grid-column:1/-1;margin:0;font-family:var(--display);font-size:18px}
+.gloss dt{font-family:var(--mono);font-weight:600;color:var(--dev);font-size:13px}
+.gloss dd{margin:0 0 4px;font-size:14px;color:var(--ink)}
+.gloss div{min-width:0}
+
+.layout{display:grid;gap:14px;grid-template-columns:minmax(0,1fr);grid-template-areas:"explain" "machine" "grid" "code" "math"}
+@media (min-width:1080px){.layout{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);grid-template-areas:"machine explain" "grid code" "math math"}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}
+.card-h{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px}
+.card-h .muted{font-family:var(--mono);font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:12px}
+.explain{grid-area:explain;display:flex;flex-direction:column;gap:6px}
+.eyebrow{font-family:var(--mono);font-size:12px;color:var(--dev);letter-spacing:.04em}
+.explain h2{font-family:var(--display);font-size:clamp(20px,2.4vw,26px);margin:0;line-height:1.2;text-wrap:balance}
+#stepBody p{margin:6px 0;max-width:68ch}
+.formula{font-family:var(--mono);font-size:13px;background:var(--codebg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:8px 0;overflow-x:auto;white-space:pre}
+.real{font-size:13.5px;color:var(--muted);border-top:1px dashed var(--line);padding-top:8px;margin-top:6px}
+.real b{color:var(--ink);font-weight:600}
+.progress{height:3px;background:var(--line);border-radius:2px;margin-top:auto;overflow:hidden}
+.progress span{display:block;height:100%;width:0;background:var(--dev)}
+
+.machine{grid-area:machine}
+.svgwrap{overflow-x:auto}
+#svg{display:block;width:100%;min-width:620px;height:auto}
+#svg text{fill:var(--ink);font-family:var(--mono);font-size:11px}
+#svg .lbl{font-family:var(--display);font-weight:600;font-size:12.5px;letter-spacing:.06em}
+#svg .mut{fill:var(--muted);font-size:10px}
+#svg .box{fill:var(--surface2);stroke:var(--line);stroke-width:1.2;transition:stroke .3s,opacity .3s}
+#svg .outer{fill:none;stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 3}
+#svg .on{stroke:var(--dev);stroke-width:2.2}
+#svg .hon{stroke:var(--host);stroke-width:2.2}
+#svg .buf{fill:var(--surface);stroke:var(--line)}
+#svg .fillD{fill:var(--dev-soft)}
+#svg .fillH{fill:var(--host-soft)}
+#svg .bus{stroke:var(--line);stroke-width:6;stroke-linecap:round;transition:stroke .3s}
+#svg .bus.act{stroke:var(--host)}
+#svg .pkt{fill:var(--host)}
+#svg .slot{fill:var(--surface);stroke:var(--line);stroke-dasharray:3 3}
+#svg .slot.res{stroke-dasharray:none;stroke:var(--muted)}
+#svg .chip{stroke-width:1.6}
+#svg .chip.ready{fill:var(--surface)}
+#svg .chip.wait{fill:var(--host-soft);stroke:var(--host)!important;stroke-dasharray:3 2}
+#svg .chip.done{fill:var(--line);stroke:var(--line)!important}
+#svg .ring{fill:none;stroke:var(--ink);stroke-width:1.6}
+
+.gridc{grid-area:grid;display:flex;flex-wrap:wrap;gap:16px}
+.gridc > .card-h{flex-basis:100%;margin-bottom:0}
+.cvbox{flex:1 1 300px;max-width:420px;min-width:0}
+#cv{width:100%;aspect-ratio:1;display:block;border-radius:6px;cursor:crosshair;max-width:100%;touch-action:manipulation}
+.legend{font-size:13px;color:var(--muted);margin:8px 0 0}
+.side{flex:1 1 240px;min-width:0;display:flex;flex-direction:column;gap:14px}
+.sub-h{font-family:var(--display);font-weight:600;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0;font-size:13px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;font-family:var(--mono);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.tag{display:inline-block;font-family:var(--mono);font-size:11.5px;padding:1px 7px;border-radius:999px;border:1px solid currentColor}
+#mm{width:100%;max-width:260px;display:block;aspect-ratio:8/7;border-radius:4px}
+.mmstat{font-size:13px;margin:6px 0 0;font-variant-numeric:tabular-nums}
+.mmstat b{font-family:var(--mono)}
+
+.code{grid-area:code}
+#code{margin:0;font-family:var(--mono);font-size:12.5px;line-height:1.6;background:var(--codebg);border-radius:8px;padding:8px 0;overflow-x:auto}
+#code .ln{display:block;padding:0 12px 0 0;white-space:pre;border-left:3px solid transparent;transition:background .25s}
+#code .ln.hl{background:var(--hl);border-left-color:var(--dev)}
+#code .no{display:inline-block;width:34px;text-align:right;color:var(--muted);opacity:.6;margin-right:12px;user-select:none}
+.tk-c{color:var(--muted);font-style:italic}
+.tk-k{color:var(--dev);font-weight:500}
+.tk-f{color:var(--host)}
+.tk-n{color:var(--w2)}
+.math{grid-area:math;--mk:var(--dev);--mk2:var(--host)}
+.mathgrid{display:grid;gap:16px 26px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.mathgrid > div{min-width:0}
+.mstep{font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 4px}
+.m{font-family:"STIX Two Text","Cambria Math","Times New Roman",serif;font-size:18px;line-height:2.2;overflow-x:auto;white-space:nowrap;padding-bottom:2px}
+.frac{display:inline-flex;flex-direction:column;vertical-align:middle;text-align:center;margin:0 3px;line-height:1.3}
+.frac>span:last-child{border-top:1px solid currentColor;padding-top:1px}
+.mnote{font-size:13.5px;color:var(--muted);margin:6px 0 0;max-width:62ch}
+.mnote b{color:var(--ink)}
+.mfull{grid-column:1/-1;border-top:1px dashed var(--line);padding-top:10px;max-width:none}
+.dif{color:var(--mk)} .rea{color:var(--mk2)}
+.num{font-family:var(--mono);font-size:12.5px;line-height:1.85;overflow-x:auto;white-space:pre;background:var(--codebg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-variant-numeric:tabular-nums}
+.cross{display:grid;grid-template-columns:repeat(3,auto);gap:3px;justify-content:start;margin:4px 0 8px;font-family:var(--mono);font-size:12px}
+.cross span{padding:3px 6px;border:1px solid var(--line);border-radius:4px;text-align:center;min-width:60px;background:var(--surface2)}
+.cross .c0{visibility:hidden}
+.cross .cc{border-color:var(--mk);font-weight:600}
+.mini{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:10px;display:flex;flex-direction:column;gap:8px;background:var(--surface2)}
+.mini-h{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-family:var(--display);font-weight:600;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.mini-btns{display:flex;gap:6px}
+.mbtn{font-family:var(--mono);font-size:12px;text-transform:none;letter-spacing:0;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:var(--surface);cursor:pointer;color:var(--ink)}
+.mbtn:hover{border-color:var(--muted)}
+.mini-body{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
+#miniGrid{flex:0 0 auto;display:block;cursor:pointer}
+.mini-side{flex:1 1 220px;min-width:0;display:flex;flex-direction:column;gap:6px}
+.mini-code{margin:0;font-family:var(--mono);font-size:12px;line-height:1.55;background:var(--codebg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;overflow-x:auto;white-space:pre}
+#miniStrip{width:100%;height:52px;display:block}
+.mini-note{font-size:13px;color:var(--muted);margin:0}
+.mini-note b{color:var(--ink)}
+footer{color:var(--muted);font-size:13px;max-width:90ch}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>CUDA <span>Machine</span></h1>
+      <p data-i="subtitle"></p>
+    </div>
+    <div class="hdr-right">
+      <span class="pill" data-i="pill"></span>
+      <button id="glossBtn" class="ghost" data-i="glossary"></button>
+      <button id="langBtn" class="ghost" aria-label="Language">ES</button>
+    </div>
+  </header>
+
+  <section class="controls" aria-label="Controls">
+    <div class="transport">
+      <button id="prev" class="tbtn" aria-label="Previous step">&#9664;</button>
+      <button id="play" class="tbtn primary"></button>
+      <button id="next" class="tbtn" aria-label="Next step">&#9654;</button>
+      <span id="counter" class="counter">1 / 15</span>
+    </div>
+    <div class="group"><span class="ctl-label" data-i="speed"></span>
+      <div class="seg" id="speeds">
+        <button data-speed="0.5">0.5×</button><button data-speed="1" aria-pressed="true">1×</button><button data-speed="2">2×</button><button data-speed="4">4×</button>
+      </div>
+    </div>
+    <details class="opts" id="opts">
+      <summary data-i="options"></summary>
+      <div class="opts-body">
+        <div class="opts-row"><span class="ctl-label" data-i="shape"></span>
+          <div class="seg" id="shapes"><button data-shape="32x4" aria-pressed="true">32×4</button><button data-shape="16x8">16×8</button><button data-shape="8x16">8×16</button></div>
+        </div>
+        <label class="check"><input type="checkbox" id="swap"> <span data-i="swap"></span></label>
+        <p class="hint" data-i="swapHint"></p>
+        <div class="opts-row"><button class="ghost" id="reseed" data-i="reseed"></button></div>
+      </div>
+    </details>
+  </section>
+
+  <nav class="rail" id="rail" aria-label="Steps"></nav>
+  <section id="gloss" class="card gloss" hidden></section>
+
+  <main class="layout">
+    <article class="card explain" aria-live="polite">
+      <div class="eyebrow" id="eyebrow"></div>
+      <h2 id="stepTitle"></h2>
+      <div id="stepBody"></div>
+      <div class="mini">
+        <div class="mini-h"><span id="miniTitle"></span><span class="mini-btns"><button id="miniPause" class="mbtn" aria-label="Pause"></button></span></div>
+        <div class="mini-body">
+          <canvas id="miniGrid" style="width:198px;height:134px" aria-label="4 by 6 grid of threads; click one to pick it"></canvas>
+          <div class="mini-side"><pre id="miniCode" class="mini-code"></pre></div>
+        </div>
+        <canvas id="miniStrip" aria-label="u in memory, idx 0 to 23"></canvas>
+        <p class="mini-note" id="miniNote"></p>
+      </div>
+      <div class="progress"><span id="bar"></span></div>
+    </article>
+
+    <section class="card machine">
+      <div class="card-h"><span data-i="machine"></span><span class="muted" id="machineNote"></span></div>
+      <div class="svgwrap"><svg id="svg" viewBox="0 0 760 310" role="img" aria-label="Host, PCIe bus and GPU"></svg></div>
+    </section>
+
+    <section class="card gridc">
+      <div class="card-h"><span data-i="domain"></span><span class="muted" id="gridStat"></span></div>
+      <div class="cvbox">
+        <canvas id="cv" aria-label="32 by 32 grid; click a cell to inspect its thread"></canvas>
+        <p class="legend" id="legend"></p>
+      </div>
+      <div class="side">
+        <div>
+          <p class="sub-h" data-i="inspector"></p>
+          <dl class="kv" id="insp"></dl>
+        </div>
+        <div>
+          <p class="sub-h" data-i="memmap"></p>
+          <canvas id="mm" aria-label="Memory sectors read by the warp"></canvas>
+          <p class="legend" data-i="memcap"></p>
+          <p class="mmstat" id="mmStat"></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card code">
+      <div class="card-h"><span>cuda/brusselator.cu</span><span class="muted" data-i="condensed"></span></div>
+      <pre id="code"></pre>
+    </section>
+
+    <section class="card math" id="math">
+      <div class="card-h"><span>Forward Euler</span><span class="muted" id="mathSub"></span></div>
+      <div class="mathgrid" id="mathBody"></div>
+    </section>
+  </main>
+
+  <footer id="footer"></footer>
+</div>
+
+<script>
+(function(){
+"use strict";
+const $ = id => document.getElementById(id);
+const NN = 32, CELLS = NN*NN, WPB = 4; // 128 threads per block = 4 warps
+const SHAPES = {"32x4":[32,4],"16x8":[16,8],"8x16":[8,16]};
+const PRM = {A:1, B:3, Du:5e-5, Dv:5e-6, dt:0.0025, idx2:NN*NN, idy2:NN*NN};
+const LIVE_STEPS = 24000;
+
+/* ---------------- i18n ---------------- */
+const T = {
+en:{
+ subtitle:"How cuda/brusselator.cu runs inside the machine, step by step",
+ pill:"toy GPU · 2 SMs · 32×32 grid", glossary:"Glossary", play:"Play", pause:"Pause", replay:"Replay",
+ speed:"Speed", options:"Options", shape:"Block shape", swap:"Swap i and j in the kernel",
+ swapHint:"Maps threadIdx.x to the row instead of the column. Results stay correct, but memory access stops being coalesced. Watch step 11.",
+ reseed:"New random initial state", condensed:"condensed, real code", machine:"The machine", domain:"Grid · one thread per node",
+ inspector:"Selected thread", memmap:"Global memory · u[ ]",
+ memcap:"Each row is one row of u: 32 doubles = 256 B = 8 sectors of 32 B. Filled = sectors the selected warp fetches for u[idx].",
+ footer:"A teaching model. Latencies, SM count and slot limits are simplified so the patterns are visible; on a real GPU a global load takes hundreds of cycles and an SM keeps dozens of warps in flight. The equations and the code are the same as in the project. See also the <a href=\"openmp.html\">OpenMP Machine</a> for the CPU version. Source code on <a href=\"https://github.com/CABA1998/Brusselator\" target=\"_blank\" rel=\"noopener\">GitHub</a>.",
+ step:"Step", host:"HOST", cpuram:"CPU + RAM", device:"DEVICE · GPU", gmem:"Global memory", gbw:"VRAM ≈ 900 GB/s", ram:"RAM",
+ pcie:"PCIe", pbw:"≈ 25 GB/s", cmem:"__constant__ P", regs:"registers · L1", ramnote:"real: 8 MiB each",
+ cpu_idle:"idle", cpu_run:"running main()", cpu_read:"readMatrix()", cpu_malloc:"cudaMalloc ×4", cpu_copy:"cudaMemcpy →", cpu_const:"MemcpyToSymbol",
+ cpu_cfg:"dim3 grid, block", cpu_launch:"launched, moves on", cpu_free:"free (async)", cpu_loop:"queues launches", cpu_sync:"waits: Synchronize", cpu_back:"cudaMemcpy ←", cpu_write:"writeMatrix()",
+ sch_idle:"scheduler: idle", sch_wait:"{n} blocks waiting", sch_iss:"issue b{b} w{w}: {op}", sch_stall:"all warps waiting", sch_kern:"kernel #{n}",
+ block:"block", warps4:"4 warps · 128 thr",
+ lg_values:"Color = concentration u (dark 0 → bright 5). This is the toy initial state U0.",
+ lg_blocks:"Each tile is one block of {bx}×{by} threads, labeled with its blockIdx.",
+ lg_sm:"Blue tint: block runs on SM 0. Copper: SM 1. Hatched: waiting for a free slot.",
+ lg_warps:"Color = warp inside the block: w0 blue, w1 copper, w2 green, w3 violet.",
+ lg_boundary:"Crossed cells: boundary threads that return immediately.",
+ lg_stencil:"Selected thread (ring), its 4 neighbours (dots) and the rest of its warp (outlined).",
+ lg_progress:"Lit: written to u_new. Tinted: warp in flight on an SM. Blank: block not started.",
+ lg_live:"The simulation running: every frame launches the kernel 40 times.",
+ i_block:"blockIdx", i_thread:"threadIdx", i_warp:"warp · lane", i_sm:"runs on", i_ij:"node (i, j)", i_idx:"idx · address",
+ i_status:"status", st_act:"computes its node", st_bnd:"boundary → return",
+ mm_stat:"Warp b{b} w{w}: <b>{lanes}</b> lanes read <b>{used} B</b>, the hardware fetches <b>{sec}</b> sectors = <b>{fetch} B</b> → <b>{eff}%</b> useful.",
+ mm_none:"Warp b{b} w{w}: every lane is on the boundary, so the warp reads nothing.",
+ gs_tick:"tick {t} / {T}", gs_live:"launch #{n} · t = {t}", gs_size:"32 × 32 = 1,024 threads",
+ g_title:"Glossary"
+},
+es:{
+ subtitle:"Cómo se ejecuta cuda/brusselator.cu dentro de la máquina, paso a paso",
+ pill:"GPU de juguete · 2 SMs · malla 32×32", glossary:"Glosario", play:"Ejecutar", pause:"Pausa", replay:"Repetir",
+ speed:"Velocidad", options:"Opciones", shape:"Forma del bloque", swap:"Intercambiar i y j en el kernel",
+ swapHint:"Asigna threadIdx.x a la fila en lugar de a la columna. El resultado sigue siendo correcto, pero el acceso a memoria deja de estar coalescido. Míralo en el paso 11.",
+ reseed:"Nuevo estado inicial aleatorio", condensed:"resumido, código real", machine:"La máquina", domain:"Malla · un hilo por nodo",
+ inspector:"Hilo seleccionado", memmap:"Memoria global · u[ ]",
+ memcap:"Cada fila es una fila de u: 32 doubles = 256 B = 8 sectores de 32 B. Relleno = sectores que el warp seleccionado trae para u[idx].",
+ footer:"Un modelo didáctico. Las latencias, el número de SMs y los límites de bloques están simplificados para que se vean los patrones; en una GPU real una lectura global tarda cientos de ciclos y un SM mantiene decenas de warps a la vez. Las ecuaciones y el código son los mismos del proyecto. Mira también <a href=\"openmp.html\">OpenMP Machine</a> para la versión de CPU. Código fuente en <a href=\"https://github.com/CABA1998/Brusselator\" target=\"_blank\" rel=\"noopener\">GitHub</a>.",
+ step:"Paso", host:"HOST", cpuram:"CPU + RAM", device:"DEVICE · GPU", gmem:"Memoria global", gbw:"VRAM ≈ 900 GB/s", ram:"RAM",
+ pcie:"PCIe", pbw:"≈ 25 GB/s", cmem:"__constant__ P", regs:"registros · L1", ramnote:"real: 8 MiB cada uno",
+ cpu_idle:"inactiva", cpu_run:"ejecuta main()", cpu_read:"readMatrix()", cpu_malloc:"cudaMalloc ×4", cpu_copy:"cudaMemcpy →", cpu_const:"MemcpyToSymbol",
+ cpu_cfg:"dim3 grid, block", cpu_launch:"lanza y sigue", cpu_free:"libre (asíncrono)", cpu_loop:"encola kernels", cpu_sync:"espera: Synchronize", cpu_back:"cudaMemcpy ←", cpu_write:"writeMatrix()",
+ sch_idle:"planificador: libre", sch_wait:"{n} bloques esperando", sch_iss:"emite b{b} w{w}: {op}", sch_stall:"todos los warps esperan", sch_kern:"kernel #{n}",
+ block:"bloque", warps4:"4 warps · 128 hilos",
+ lg_values:"Color = concentración u (oscuro 0 → claro 5). Es el estado inicial U0 de juguete.",
+ lg_blocks:"Cada baldosa es un bloque de {bx}×{by} hilos, con su blockIdx.",
+ lg_sm:"Tinte azul: el bloque corre en el SM 0. Cobre: SM 1. Rayado: espera un hueco libre.",
+ lg_warps:"Color = warp dentro del bloque: w0 azul, w1 cobre, w2 verde, w3 violeta.",
+ lg_boundary:"Celdas tachadas: hilos de frontera que hacen return de inmediato.",
+ lg_stencil:"Hilo seleccionado (anillo), sus 4 vecinos (puntos) y el resto de su warp (contorno).",
+ lg_progress:"Iluminado: escrito en u_new. Tintado: warp en ejecución en un SM. Vacío: bloque sin empezar.",
+ lg_live:"La simulación en marcha: cada fotograma lanza el kernel 40 veces.",
+ i_block:"blockIdx", i_thread:"threadIdx", i_warp:"warp · lane", i_sm:"corre en", i_ij:"nodo (i, j)", i_idx:"idx · dirección",
+ i_status:"estado", st_act:"calcula su nodo", st_bnd:"frontera → return",
+ mm_stat:"Warp b{b} w{w}: <b>{lanes}</b> lanes leen <b>{used} B</b>, el hardware trae <b>{sec}</b> sectores = <b>{fetch} B</b> → <b>{eff}%</b> útil.",
+ mm_none:"Warp b{b} w{w}: todos sus lanes están en la frontera, así que no lee nada.",
+ gs_tick:"tick {t} / {T}", gs_live:"lanzamiento #{n} · t = {t}", gs_size:"32 × 32 = 1.024 hilos",
+ g_title:"Glosario"
+}};
+
+const STEPS = {
+en:[
+ ["Two processors, one program",
+  `<p>A CUDA program runs on two processors. The <b>CPU</b> (the <i>host</i>) runs <code>main()</code> and gives the orders. The <b>GPU</b> (the <i>device</i>) has its own memory and thousands of small cores, and it only runs functions marked <code>__global__</code>, called <b>kernels</b>.</p>
+   <p>This page follows <code>cuda/brusselator.cu</code> on a toy GPU: a 32 × 32 grid instead of 1024 × 1024, and 2 SMs instead of dozens. Press <b>Play</b>, or use the ← → keys. Click any cell of the grid to follow its thread.</p>`],
+ ["The data starts on the host",
+  `<p><code>readMatrix</code> loads U0 and V0 from disk into CPU RAM. The GPU cannot read this memory directly.</p>
+   <p>The 2-D vectors are <b>flattened</b> into one contiguous array, with node (i, j) at position <code>i*m + j</code>, because a copy to the GPU moves one solid block of bytes.</p>`,
+  `In the real run each array is <b>1024 × 1024 doubles = 8 MiB</b>.`],
+ ["cudaMalloc: memory on the GPU",
+  `<p><code>cudaMalloc</code> reserves space in the GPU's <b>global memory</b> (its VRAM) and returns a <b>device pointer</b>. The CPU keeps the pointer but must never dereference it: that address means nothing in CPU RAM.</p>
+   <p>We need four buffers: the current state (<code>d_u</code>, <code>d_v</code>) and the next state (<code>d_u_new</code>, <code>d_v_new</code>).</p>`],
+ ["Copy across the PCIe bus",
+  `<p><code>cudaMemcpy(…, cudaMemcpyHostToDevice)</code> sends the initial state over the PCIe bus. This bus is slow next to the GPU's own memory, about 25 GB/s against about 900 GB/s. That is why a good CUDA program copies <b>once at the start and once at the end</b>.</p>
+   <p>The initial state goes into <b>both</b> buffers. The kernel never writes the boundary nodes, so this keeps the Dirichlet value U0 on the border after every swap.</p>`],
+ ["Parameters in constant memory",
+  `<p>A, B, Du, Dv, dt and 1/dx² go into <code>__constant__</code> memory: a small (64 KB), cached, read-only area.</p>
+   <p>When all 32 threads of a warp read the <b>same</b> address, as they do here with <code>P.dt</code>, the value is broadcast to all of them in a single read.</p>`],
+ ["Split the work: grid and blocks",
+  `<p>Before launching, the host decides how to divide the work. A <b>block</b> is a team of threads that runs on one SM. The <b>grid</b> is the set of all blocks.</p>
+   <p>Here a block is {bx} × {by} = 128 threads, so the 32 × 32 domain needs {gx} × {gy} = {nb} blocks. Each tile on the grid is one block. Try another block shape in <b>Options</b>.</p>`,
+  `Real file: <b>block(32, 8)</b> = 256 threads, and 1024 × 1024 needs <b>32 × 128 = 4,096 blocks</b>.`],
+ ["Launch: blocks go to the SMs",
+  `<p><code>stepKernel&lt;&lt;&lt;grid, block&gt;&gt;&gt;</code> puts the launch in a queue and returns at once. The CPU does not wait.</p>
+   <p>The GPU's block scheduler hands blocks to the <b>SMs</b> (streaming multiprocessors). In this toy each SM holds at most 2 blocks, so 4 blocks start and 4 wait for a slot. A block never moves between SMs once it starts.</p>`,
+  `A real GPU has <b>30 to 140 SMs</b>, each holding up to 16–32 blocks, limited by the registers and shared memory each block needs.`],
+ ["Blocks are split into warps",
+  `<p>An SM does not run threads one at a time. It splits each block into <b>warps of 32 threads</b> that execute the same instruction at the same moment, each on its own data. NVIDIA calls this SIMT.</p>
+   <p>Thread <code>t = threadIdx.y × blockDim.x + threadIdx.x</code> goes to warp <code>t / 32</code>, lane <code>t % 32</code>. With a 32-wide block, each warp is exactly one row of the grid.</p>`],
+ ["Every thread finds its node",
+  `<p>All threads run the same code. Only their built-in IDs differ: <code>blockIdx</code>, <code>threadIdx</code> and <code>blockDim</code>. From them, each thread works out which node is its own. These two lines replace the two nested <code>for</code> loops of the OpenMP version.</p>
+   <p>For the selected thread:</p>`],
+ ["Boundary threads leave early",
+  `<p>Threads on the border of the domain hit <code>return</code>: those nodes keep their boundary value. Inside a warp, lanes that returned sit idle while the rest of the warp works. This is called <b>divergence</b>.</p>
+   <p>Here it is cheap because it only affects the edges. If half the lanes of every warp took a different branch, the warp would run both paths one after the other.</p>`],
+ ["Reading global memory: coalescing",
+  `<p>Now each thread reads its node and its four neighbours. What matters for speed is the pattern of the <b>whole warp</b>. When 32 lanes read 32 consecutive doubles, the hardware merges them into a few 32-byte sectors. This is a <b>coalesced</b> access.</p>
+   <p>The memory map shows the sectors the warp touches for <code>u[idx]</code>. Turn on <b>Swap i and j</b> in Options: each lane then reads a different row, and the warp fetches far more bytes than it uses.</p>`],
+ ["Arithmetic in registers",
+  `<p>With the values in <b>registers</b>, the math is fast. Each thread computes the Laplacian and the reaction terms of its node and writes the result to <code>u_new</code> and <code>v_new</code>.</p>
+   <p>The compiler fuses many <code>a*b + c</code> into single <b>FMA</b> instructions. That is why GPU results can differ from the CPU in the last digits (the <code>--verify</code> mode shows about 1e-12). The inspector shows the values for the selected thread.</p>`],
+ ["The kernel runs: hiding latency",
+  `<p>This is the whole kernel on the toy GPU. A load from global memory takes a long time. Instead of waiting, each SM's <b>warp scheduler</b> switches to another warp that is ready, at no cost.</p>
+   <p>With enough warps per SM, the arithmetic of some warps covers the memory waits of the others. When all warps of a block finish, the slot goes to a waiting block. Watch the chips: dashed copper = waiting for memory, solid = issuing now, grey = done.</p>`],
+ ["Swap pointers and launch again",
+  `<p>The host swaps the pointers, so <code>u_new</code> becomes <code>u</code>, and launches the kernel again. No data moves: only two addresses change.</p>
+   <p>Launches on the same stream run in order, so each step starts after the previous one has finished. Everything stays on the GPU.</p>`,
+  `The real run does this <b>400,000 times</b> (Tmax / dt), and the CPU never touches the data in between.`],
+ ["Synchronize and copy back",
+  `<p><code>cudaEventSynchronize</code> makes the CPU wait until the GPU has finished the whole queue. Then <code>cudaMemcpy(…, cudaMemcpyDeviceToHost)</code> brings the final state back over PCIe, and <code>writeMatrix</code> saves it to disk.</p>
+   <p>That is the whole program: copy in once, launch many kernels, copy out once.</p>`]
+],
+es:[
+ ["Dos procesadores, un programa",
+  `<p>Un programa CUDA se ejecuta en dos procesadores. La <b>CPU</b> (el <i>host</i>) ejecuta <code>main()</code> y da las órdenes. La <b>GPU</b> (el <i>device</i>) tiene su propia memoria y miles de núcleos pequeños, y solo ejecuta las funciones marcadas con <code>__global__</code>, llamadas <b>kernels</b>.</p>
+   <p>Esta página sigue <code>cuda/brusselator.cu</code> en una GPU de juguete: una malla de 32 × 32 en lugar de 1024 × 1024, y 2 SMs en lugar de decenas. Pulsa <b>Ejecutar</b> o usa las teclas ← →. Haz clic en cualquier celda para seguir a su hilo.</p>`],
+ ["Los datos empiezan en el host",
+  `<p><code>readMatrix</code> carga U0 y V0 del disco a la RAM de la CPU. La GPU no puede leer esta memoria directamente.</p>
+   <p>Los vectores 2-D se <b>aplanan</b> en un único arreglo contiguo, con el nodo (i, j) en la posición <code>i*m + j</code>, porque una copia a la GPU mueve un bloque continuo de bytes.</p>`,
+  `En la ejecución real cada arreglo tiene <b>1024 × 1024 doubles = 8 MiB</b>.`],
+ ["cudaMalloc: memoria en la GPU",
+  `<p><code>cudaMalloc</code> reserva espacio en la <b>memoria global</b> de la GPU (su VRAM) y devuelve un <b>puntero de device</b>. La CPU guarda el puntero, pero nunca debe desreferenciarlo: esa dirección no significa nada en la RAM de la CPU.</p>
+   <p>Necesitamos cuatro buffers: el estado actual (<code>d_u</code>, <code>d_v</code>) y el siguiente (<code>d_u_new</code>, <code>d_v_new</code>).</p>`],
+ ["Copia por el bus PCIe",
+  `<p><code>cudaMemcpy(…, cudaMemcpyHostToDevice)</code> envía el estado inicial por el bus PCIe. Este bus es lento comparado con la memoria propia de la GPU: unos 25 GB/s frente a unos 900 GB/s. Por eso un buen programa CUDA copia <b>una vez al principio y una vez al final</b>.</p>
+   <p>El estado inicial se copia en <b>ambos</b> buffers. El kernel nunca escribe los nodos de frontera, así el valor de Dirichlet U0 se mantiene en el borde tras cada intercambio.</p>`],
+ ["Parámetros en memoria constante",
+  `<p>A, B, Du, Dv, dt y 1/dx² van a la memoria <code>__constant__</code>: una zona pequeña (64 KB), con caché y de solo lectura.</p>
+   <p>Cuando los 32 hilos de un warp leen la <b>misma</b> dirección, como aquí con <code>P.dt</code>, el valor se difunde a todos en una sola lectura.</p>`],
+ ["Repartir el trabajo: grid y bloques",
+  `<p>Antes de lanzar, el host decide cómo dividir el trabajo. Un <b>bloque</b> es un equipo de hilos que se ejecuta en un SM. El <b>grid</b> es el conjunto de todos los bloques.</p>
+   <p>Aquí un bloque tiene {bx} × {by} = 128 hilos, así que el dominio de 32 × 32 necesita {gx} × {gy} = {nb} bloques. Cada baldosa de la malla es un bloque. Prueba otra forma de bloque en <b>Opciones</b>.</p>`,
+  `Archivo real: <b>block(32, 8)</b> = 256 hilos, y 1024 × 1024 necesita <b>32 × 128 = 4.096 bloques</b>.`],
+ ["Lanzamiento: los bloques van a los SMs",
+  `<p><code>stepKernel&lt;&lt;&lt;grid, block&gt;&gt;&gt;</code> pone el lanzamiento en una cola y vuelve enseguida. La CPU no espera.</p>
+   <p>El planificador de bloques de la GPU reparte los bloques entre los <b>SMs</b> (multiprocesadores). En este juguete cada SM admite como máximo 2 bloques, así que empiezan 4 y otros 4 esperan un hueco. Un bloque nunca cambia de SM una vez empieza.</p>`,
+  `Una GPU real tiene <b>de 30 a 140 SMs</b>, cada uno con hasta 16–32 bloques, según los registros y la memoria compartida que use cada bloque.`],
+ ["Los bloques se dividen en warps",
+  `<p>Un SM no ejecuta los hilos de uno en uno. Divide cada bloque en <b>warps de 32 hilos</b> que ejecutan la misma instrucción en el mismo instante, cada uno con sus datos. NVIDIA lo llama SIMT.</p>
+   <p>El hilo <code>t = threadIdx.y × blockDim.x + threadIdx.x</code> va al warp <code>t / 32</code>, lane <code>t % 32</code>. Con un bloque de 32 de ancho, cada warp es exactamente una fila de la malla.</p>`],
+ ["Cada hilo encuentra su nodo",
+  `<p>Todos los hilos ejecutan el mismo código. Solo cambian sus identificadores: <code>blockIdx</code>, <code>threadIdx</code> y <code>blockDim</code>. Con ellos cada hilo calcula qué nodo le toca. Estas dos líneas sustituyen a los dos <code>for</code> anidados de la versión OpenMP.</p>
+   <p>Para el hilo seleccionado:</p>`],
+ ["Los hilos de frontera salen antes",
+  `<p>Los hilos del borde del dominio llegan al <code>return</code>: esos nodos conservan su valor de frontera. Dentro de un warp, los lanes que salieron quedan ociosos mientras el resto trabaja. Esto se llama <b>divergencia</b>.</p>
+   <p>Aquí sale barato porque solo afecta a los bordes. Si la mitad de los lanes de cada warp tomara otra rama, el warp ejecutaría los dos caminos uno tras otro.</p>`],
+ ["Leer memoria global: coalescencia",
+  `<p>Ahora cada hilo lee su nodo y sus cuatro vecinos. Lo que importa para la velocidad es el patrón del <b>warp completo</b>. Cuando 32 lanes leen 32 doubles consecutivos, el hardware los agrupa en pocos sectores de 32 bytes. Es un acceso <b>coalescido</b>.</p>
+   <p>El mapa de memoria muestra los sectores que toca el warp para <code>u[idx]</code>. Activa <b>Intercambiar i y j</b> en Opciones: cada lane lee entonces una fila distinta y el warp trae muchos más bytes de los que usa.</p>`],
+ ["Aritmética en registros",
+  `<p>Con los valores en <b>registros</b>, las cuentas son rápidas. Cada hilo calcula el laplaciano y los términos de reacción de su nodo y escribe el resultado en <code>u_new</code> y <code>v_new</code>.</p>
+   <p>El compilador fusiona muchos <code>a*b + c</code> en instrucciones <b>FMA</b>. Por eso la GPU puede diferir de la CPU en los últimos dígitos (el modo <code>--verify</code> muestra unos 1e-12). El inspector muestra los valores del hilo seleccionado.</p>`],
+ ["El kernel corre: ocultar la latencia",
+  `<p>Este es el kernel completo en la GPU de juguete. Una lectura de memoria global tarda mucho. En lugar de esperar, el <b>planificador de warps</b> de cada SM cambia a otro warp que esté listo, sin coste.</p>
+   <p>Con suficientes warps por SM, las cuentas de unos tapan las esperas de memoria de otros. Cuando todos los warps de un bloque terminan, su hueco pasa a un bloque en espera. Mira los chips: cobre discontinuo = espera memoria, sólido = emitiendo, gris = terminado.</p>`],
+ ["Intercambiar punteros y relanzar",
+  `<p>El host intercambia los punteros, de modo que <code>u_new</code> pasa a ser <code>u</code>, y lanza el kernel de nuevo. No se mueve ningún dato: solo cambian dos direcciones.</p>
+   <p>Los lanzamientos en el mismo stream se ejecutan en orden, así que cada paso empieza cuando el anterior ha terminado. Todo se queda en la GPU.</p>`,
+  `La ejecución real hace esto <b>400.000 veces</b> (Tmax / dt), y la CPU no toca los datos entretanto.`],
+ ["Sincronizar y copiar de vuelta",
+  `<p><code>cudaEventSynchronize</code> hace que la CPU espere a que la GPU termine toda la cola. Después <code>cudaMemcpy(…, cudaMemcpyDeviceToHost)</code> trae el estado final por PCIe y <code>writeMatrix</code> lo guarda en disco.</p>
+   <p>Ese es el programa completo: copiar una vez, lanzar muchos kernels, copiar de vuelta una vez.</p>`]
+]};
+
+const GLOSS = {
+en:[["Host","The CPU and its RAM. Runs main() and launches kernels."],["Device","The GPU and its own memory (VRAM)."],["Kernel","A __global__ function launched from the host and run by many GPU threads at once."],["Thread","One execution of the kernel. Here: one grid node."],["Block","A team of threads that runs on one SM and can share fast memory."],["Grid","All the blocks of one kernel launch."],["Warp","32 threads of a block that execute each instruction together."],["Lane","A thread's position (0–31) inside its warp."],["SM","Streaming Multiprocessor: a GPU core cluster with its own schedulers, registers and L1 cache."],["Global memory","The GPU's main memory (VRAM). Large, fast in bandwidth, slow in latency."],["Constant memory","64 KB read-only cached memory; fast when a warp reads one address."],["Registers","The fastest storage, private to each thread."],["Coalescing","A warp's 32 loads merged into a few memory transactions."],["Divergence","Lanes of one warp taking different paths, so some sit idle."],["Latency hiding","Switching to ready warps while others wait for memory."],["Stream","A queue of GPU work that runs in order."]],
+es:[["Host","La CPU y su RAM. Ejecuta main() y lanza los kernels."],["Device","La GPU y su propia memoria (VRAM)."],["Kernel","Una función __global__ que lanza el host y ejecutan muchos hilos de la GPU a la vez."],["Hilo (thread)","Una ejecución del kernel. Aquí: un nodo de la malla."],["Bloque","Un equipo de hilos que corre en un SM y puede compartir memoria rápida."],["Grid","Todos los bloques de un lanzamiento."],["Warp","32 hilos de un bloque que ejecutan cada instrucción juntos."],["Lane","La posición de un hilo (0–31) dentro de su warp."],["SM","Streaming Multiprocessor: un grupo de núcleos con sus planificadores, registros y caché L1."],["Memoria global","La memoria principal de la GPU (VRAM). Grande, mucho ancho de banda, latencia alta."],["Memoria constante","64 KB de solo lectura con caché; rápida si un warp lee una sola dirección."],["Registros","El almacenamiento más rápido, privado de cada hilo."],["Coalescencia","Las 32 lecturas de un warp agrupadas en pocas transacciones."],["Divergencia","Lanes de un warp que siguen caminos distintos, y unos esperan a otros."],["Ocultar latencia","Cambiar a warps listos mientras otros esperan a la memoria."],["Stream","Una cola de trabajo de la GPU que se ejecuta en orden."]]
+};
+
+/* step meta: duration (ms @1x), highlighted code lines (1-based), grid mode, active machine parts */
+const META = [
+ {d:6500, code:[21], grid:"values", parts:["cpu"]},
+ {d:6500, code:[22], grid:"values", parts:["cpu","ram"]},
+ {d:6000, code:[23], grid:"values", parts:["cpu","gmem"]},
+ {d:7000, code:[24], grid:"values", parts:["ram","bus","gmem"]},
+ {d:5500, code:[1,25], grid:"values", parts:["bus","cmem"]},
+ {d:7500, code:[26,27], grid:"blocks", parts:["cpu"]},
+ {d:7500, code:[29], grid:"sm", parts:["cpu","sm0","sm1"]},
+ {d:7500, code:[3,4,5], grid:"warps", parts:["sm0","sm1"]},
+ {d:7500, code:[6,7], grid:"warps", parts:["sm0","sm1"]},
+ {d:7500, code:[8], grid:"boundary", parts:["sm0","sm1"]},
+ {d:9000, code:[10,11,12,13], grid:"stencil", parts:["gmem","sm0","sm1"]},
+ {d:7500, code:[14,15,16,17], grid:"stencil", parts:["sm0","sm1","gmem"]},
+ {d:15000, code:[3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18], grid:"progress", parts:["sm0","sm1","gmem","cmem"]},
+ {d:12000, code:[28,29,30,31], grid:"live", parts:["cpu","sm0","sm1","gmem"]},
+ {d:7000, code:[32,33,34], grid:"live", parts:["cpu","bus","ram"]}
+];
+const LAST = META.length-1;
+
+/* ---------------- state ---------------- */
+function loadLang(){ try{ const l=localStorage.getItem("cm-lang"); if(l==="en"||l==="es") return l; }catch(e){} return (navigator.language||"en").toLowerCase().startsWith("es")?"es":"en"; }
+const S = {step:0, p:0, playing:false, hold:0, speed:1, lang:loadLang(), shape:"32x4", swap:false, sel:{i:5,j:10}, seed:7};
+let U0,V0,U1,V1, sim=null, G=null;
+
+function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+function stepCPU(u,v,un,vn){
+  for(let i=1;i<NN-1;i++) for(let j=1;j<NN-1;j++){
+    const c=i*NN+j, uc=u[c], vc=v[c];
+    const lu=(u[c+NN]-2*uc+u[c-NN])*PRM.idx2+(u[c+1]-2*uc+u[c-1])*PRM.idy2;
+    const lv=(v[c+NN]-2*vc+v[c-NN])*PRM.idx2+(v[c+1]-2*vc+v[c-1])*PRM.idy2;
+    const uuv=uc*uc*vc;
+    un[c]=uc+PRM.dt*(PRM.Du*lu+PRM.A-(PRM.B+1)*uc+uuv);
+    vn[c]=vc+PRM.dt*(PRM.Dv*lv+PRM.B*uc-uuv);
+  }
+}
+function initField(){
+  const r=rng(S.seed); U0=new Float64Array(CELLS); V0=new Float64Array(CELLS);
+  for(let c=0;c<CELLS;c++){U0[c]=2*r(); V0[c]=2*r();}
+  U1=U0.slice(); V1=V0.slice(); stepCPU(U0,V0,U1,V1); sim=null;
+}
+function resetSim(){ sim={u:U1.slice(),v:V1.slice(),un:U1.slice(),vn:V1.slice(),n:1}; }
+function runSimTo(target){ while(sim.n<target){ stepCPU(sim.u,sim.v,sim.un,sim.vn); let t=sim.u;sim.u=sim.un;sim.un=t; t=sim.v;sim.v=sim.vn;sim.vn=t; sim.n++; } }
+const isBnd = c => { const i=(c/NN)|0, j=c%NN; return i===0||j===0||i===NN-1||j===NN-1; };
+
+/* ---------------- geometry + schedule ---------------- */
+function buildGeo(){
+  const [bx,by]=SHAPES[S.shape], gx=NN/bx, gy=NN/by, nb=gx*gy;
+  const g={bx,by,gx,gy,nb,cB:new Int16Array(CELLS),cW:new Int16Array(CELLS),cL:new Int16Array(CELLS),cTx:new Int16Array(CELLS),cTy:new Int16Array(CELLS),wCells:[],wAct:[]};
+  for(let k=0;k<nb*WPB;k++) g.wCells.push([]);
+  for(let byi=0;byi<gy;byi++) for(let bxi=0;bxi<gx;bxi++) for(let ty=0;ty<by;ty++) for(let tx=0;tx<bx;tx++){
+    const a=bxi*bx+tx, b=byi*by+ty; const i=S.swap?a:b, j=S.swap?b:a; const c=i*NN+j;
+    const blk=byi*gx+bxi, lin=ty*bx+tx, gw=blk*WPB+(lin>>5);
+    g.cB[c]=blk; g.cW[c]=gw; g.cL[c]=lin&31; g.cTx[c]=tx; g.cTy[c]=ty; g.wCells[gw][lin&31]=c;
+  }
+  g.wAct=g.wCells.map(cs=>cs.some(c=>!isBnd(c)));
+  g.frames=schedule(g);
+  G=g;
+}
+function schedule(g){
+  const LAT=14, PROG=["LD","FMA","FMA","FMA","FMA","ST"];
+  const W=g.wCells.map((_,k)=>({pc:0,wait:-1,done:false,exit:!g.wAct[k]}));
+  const queue=[]; for(let b=0;b<g.nb;b++) queue.push(b);
+  const sms=[{slots:[null,null],rr:0},{slots:[null,null],rr:0}];
+  const frames=[]; const done=new Uint8Array(g.nb*WPB); let t=0;
+  const fill=()=>{ let moved=true; while(queue.length&&moved){ moved=false; for(const sm of sms){ const k=sm.slots.indexOf(null); if(k>=0&&queue.length){ sm.slots[k]=queue.shift(); moved=true; } } } };
+  const snap=(iss)=>frames.push({t, done:done.slice(), queue:queue.length, sms:sms.map((sm,si)=>({iss:iss[si], slots:sm.slots.map(b=>b===null?null:{b, st:[0,1,2,3].map(w=>{const gw=b*WPB+w, x=W[gw]; if(x.done) return iss[si]&&iss[si].gw===gw?"issue":"done"; if(iss[si]&&iss[si].gw===gw) return "issue"; return x.wait>t?"wait":"ready";})})}))});
+  fill(); snap([null,null]); t=1;
+  while(done.some(x=>!x) && t<600){
+    fill();
+    const iss=[null,null];
+    sms.forEach((sm,si)=>{
+      const res=[]; sm.slots.forEach(b=>{ if(b!==null) for(let w=0;w<WPB;w++) res.push(b*WPB+w); });
+      for(let k=0;k<res.length;k++){
+        const gw=res[(sm.rr+k)%res.length], x=W[gw];
+        if(x.done||x.wait>t) continue;
+        let op;
+        if(x.exit){ op="EXIT"; x.done=true; done[gw]=1; }
+        else { op=PROG[x.pc]; if(op==="LD"){ x.wait=t+LAT; x.pc++; } else if(op==="ST"){ x.done=true; done[gw]=1; } else x.pc++; }
+        iss[si]={gw,op}; sm.rr=(sm.rr+k+1)%res.length; break;
+      }
+    });
+    snap(iss);
+    sms.forEach(sm=>sm.slots.forEach((b,k)=>{ if(b!==null && [0,1,2,3].every(w=>W[b*WPB+w].done)) sm.slots[k]=null; }));
+    t++;
+  }
+  fill(); snap([null,null]);
+  return frames;
+}
+function threadOf(i,j){ const c=i*NN+j, b=G.cB[c]; return {c,b,bxi:b%G.gx,byi:(b/G.gx)|0,tx:G.cTx[c],ty:G.cTy[c],gw:G.cW[c],w:G.cW[c]%WPB,lane:G.cL[c],sm:b%2}; }
+
+/* ---------------- helpers ---------------- */
+const tr = (k,v) => { let s=(T[S.lang][k]??T.en[k]??k); if(v) for(const x in v) s=s.split("{"+x+"}").join(v[x]); return s; };
+const fmt = (x,d) => (Math.abs(x)<1e-12?0:x).toFixed(d);
+const nf = n => n.toLocaleString(S.lang==="es"?"es-ES":"en-US");
+function vars(){ const th=threadOf(S.sel.i,S.sel.j); return {bx:G.bx,by:G.by,gx:G.gx,gy:G.gy,nb:G.nb,...th,i:S.sel.i,j:S.sel.j}; }
+
+/* ---------------- code panel ---------------- */
+function codeLines(){
+  const sw=S.swap;
+  return [
+"// ---- GPU code (device) ----",
+"__constant__ Params P;",
+"",
+"__global__ void stepKernel(const double* u, const double* v,",
+"                           double* u_new, double* v_new, int n, int m)",
+"{",
+sw?"  int i = blockIdx.x * blockDim.x + threadIdx.x;  // swapped!":"  int j = blockIdx.x * blockDim.x + threadIdx.x;  // column",
+sw?"  int j = blockIdx.y * blockDim.y + threadIdx.y;  // swapped!":"  int i = blockIdx.y * blockDim.y + threadIdx.y;  // row",
+"  if (i < 1 || i >= n - 1 || j < 1 || j >= m - 1) return;",
+"",
+"  int idx = i * m + j;",
+"  double uc = u[idx], vc = v[idx];",
+"  double lap_u = (u[idx+m] - 2*uc + u[idx-m]) * P.inv_dx2",
+"               + (u[idx+1] - 2*uc + u[idx-1]) * P.inv_dy2;",
+"  double lap_v = /* same stencil on v */;",
+"  double uuv = uc * uc * vc;",
+"  u_new[idx] = uc + P.dt * (P.Du*lap_u + P.A - (P.B+1)*uc + uuv);",
+"  v_new[idx] = vc + P.dt * (P.Dv*lap_v + P.B*uc - uuv);",
+"}",
+"",
+"// ---- CPU code (host) ----",
+"int main() {",
+"  readMatrix(\"data/u0.dat\", U);   h_u = flatten(U);",
+"  cudaMalloc(&d_u, bytes);   // x4: d_u d_v d_u_new d_v_new",
+"  cudaMemcpy(d_u, h_u.data(), bytes, cudaMemcpyHostToDevice);",
+"  cudaMemcpyToSymbol(P, &p, sizeof(Params));",
+`  dim3 block(${G.bx}, ${G.by});         // toy; real file: (32, 8)`,
+`  dim3 grid(${G.gx}, ${G.gy});           // ${G.nb} blocks`,
+"  for (long long s = 0; s < num_steps; ++s) {",
+"    stepKernel<<<grid, block>>>(d_u, d_v, d_u_new, d_v_new, n, m);",
+"    std::swap(d_u, d_u_new);   std::swap(d_v, d_v_new);",
+"  }",
+"  cudaEventSynchronize(stop);",
+"  cudaMemcpy(h_u.data(), d_u, bytes, cudaMemcpyDeviceToHost);",
+"  writeMatrix(\"output/uf_cuda.dat\", U);",
+"}"];
+}
+const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+function hlCode(line){
+  let cm=""; const k=line.indexOf("//"); const k2=line.indexOf("/*");
+  let cut=-1; if(k>=0) cut=k; if(k2>=0&&(cut<0||k2<cut)) cut=k2;
+  let body=line; if(cut>=0){ body=line.slice(0,cut); cm=line.slice(cut); }
+  let h=esc(body)
+    .replace(/\b(__global__|__constant__|const|double|int|void|if|return|for|long|dim3)\b/g,'<span class="tk-k">$1</span>')
+    .replace(/\b(cuda\w+|readMatrix|writeMatrix|flatten|stepKernel)\b/g,'<span class="tk-f">$1</span>')
+    .replace(/\b(\d+)\b/g,'<span class="tk-n">$1</span>');
+  if(cm) h+='<span class="tk-c">'+esc(cm)+'</span>';
+  return h;
+}
+function renderCode(){
+  const hl=new Set(META[S.step].code);
+  $("code").innerHTML=codeLines().map((l,k)=>`<span class="ln${hl.has(k+1)?" hl":""}"><span class="no">${k+1}</span>${hlCode(l)||" "}</span>`).join("");
+  const first=$("code").querySelector(".hl");
+  if(first){ const pre=$("code"); const top=first.offsetTop-pre.offsetTop; if(pre.scrollHeight>pre.clientHeight) pre.scrollTop=Math.max(0,top-40); }
+}
+
+/* ---------------- explanation ---------------- */
+function renderText(){
+  const st=STEPS[S.lang][S.step], v=vars();
+  $("eyebrow").textContent=`${tr("step")} ${S.step+1} / ${LAST+1}`;
+  $("stepTitle").textContent=st[0];
+  let body=st[1].replace(/\{(\w+)\}/g,(_,k)=>v[k]??"");
+  if(S.step===8){
+    const ax=S.swap?"i":"j", ay=S.swap?"j":"i";
+    body+=`<div class="formula">${ax} = blockIdx.x·blockDim.x + threadIdx.x = ${v.bxi}·${G.bx} + ${v.tx} = ${S.swap?v.i:v.j}\n${ay} = blockIdx.y·blockDim.y + threadIdx.y = ${v.byi}·${G.by} + ${v.ty} = ${S.swap?v.j:v.i}</div>`;
+  }
+  if(S.step===9){
+    body+= S.lang==="es"
+      ? `<p class="real">${nf(124)} de ${nf(1024)} hilos salen antes (12%). En la ejecución real: <b>${nf(4092)} de ${nf(1048576)}</b> (0,4%).</p>`
+      : `<p class="real">124 of 1,024 threads return early (12%). In the real run: <b>4,092 of 1,048,576</b> (0.4%).</p>`;
+  }
+  if(S.step===10) body+=`<p class="real">${memStats().html}</p>`;
+  if(st[2]) body+=`<p class="real">${st[2]}</p>`;
+  $("stepBody").innerHTML=body;
+  $("counter").textContent=`${S.step+1} / ${LAST+1}`;
+  [...$("rail").children].forEach((b,k)=>{b.className=k===S.step?"cur":(k<S.step?"done":""); b.title=STEPS[S.lang][k][0];});
+}
+
+/* ---------------- machine SVG ---------------- */
+function buildSVG(){
+  const slot=(sm,k)=>{ const x=sm?604:444, y=k?186:92;
+    let s=`<rect id="sl${sm}${k}" class="slot" x="${x}" y="${y}" width="130" height="84" rx="6"/>`+
+      `<text id="slt${sm}${k}" x="${x+10}" y="${y+18}"></text>`;
+    for(let w=0;w<4;w++) s+=`<rect id="ch${sm}${k}${w}" class="chip ready" x="${x+10+w*29}" y="${y+28}" width="25" height="22" rx="4" style="stroke:var(--w${w})"/>`+
+      `<text id="cht${sm}${k}${w}" x="${x+16+w*29}" y="${y+43}" style="font-size:10px">w${w}</text>`;
+    s+=`<rect id="rg${sm}${k}" class="ring" x="0" y="0" width="29" height="26" rx="5" visibility="hidden"/>`;
+    s+=`<text id="sls${sm}${k}" class="mut" x="${x+10}" y="${y+70}"></text>`;
+    return s; };
+  const buf=(k,name)=>{ const y=92+k*34; return `<rect class="buf" x="262" y="${y}" width="150" height="26" rx="4"/><rect id="bf${k}" class="fillD" x="263" y="${y+1}" width="0" height="24" rx="3"/><text id="bn${k}" x="270" y="${y+17}">${name}</text>`; };
+  $("svg").innerHTML=`
+  <rect class="outer" x="6" y="8" width="168" height="294" rx="10"/>
+  <text class="lbl" x="18" y="30">${tr("host")}</text><text class="mut" x="72" y="30">${tr("cpuram")}</text>
+  <rect id="p-cpu" class="box" x="18" y="44" width="144" height="56" rx="7"/>
+  <text class="lbl" x="30" y="66">CPU</text><text id="cpuStat" x="30" y="88" style="font-size:10.5px"></text>
+  <rect id="p-ram" class="box" x="18" y="112" width="144" height="178" rx="7"/>
+  <text class="lbl" x="30" y="134">${tr("ram")}</text>
+  <rect class="buf" x="30" y="148" width="120" height="26" rx="4"/><rect id="hf0" class="fillH" x="31" y="149" width="0" height="24" rx="3"/><text x="38" y="165">h_u</text>
+  <rect class="buf" x="30" y="184" width="120" height="26" rx="4"/><rect id="hf1" class="fillH" x="31" y="185" width="0" height="24" rx="3"/><text x="38" y="201">h_v</text>
+  <text class="mut" x="30" y="232">${tr("ramnote")}</text>
+  <line id="p-bus" class="bus" x1="176" y1="162" x2="238" y2="162"/>
+  <text class="lbl" x="188" y="150" style="font-size:11px">${tr("pcie")}</text><text class="mut" x="178" y="184">${tr("pbw")}</text>
+  <g id="pkts">${[0,1,2,3,4].map(k=>`<circle class="pkt" r="4" cx="180" cy="162" visibility="hidden"/>`).join("")}</g>
+  <rect class="outer" x="242" y="8" width="512" height="294" rx="10"/>
+  <text class="lbl" x="254" y="30">${tr("device")}</text>
+  <rect id="p-gmem" class="box" x="252" y="44" width="170" height="246" rx="7"/>
+  <text class="lbl" x="262" y="64">${tr("gmem")}</text><text class="mut" x="262" y="80">${tr("gbw")}</text>
+  ${buf(0,"d_u")}${buf(1,"d_v")}${buf(2,"d_u_new")}${buf(3,"d_v_new")}
+  <rect id="p-cmem" class="box" x="262" y="236" width="150" height="44" rx="5"/>
+  <text id="cmt" x="272" y="255">${tr("cmem")}</text><text id="cms" class="mut" x="272" y="271">A B Du Dv dt 1/dx²</text>
+  <rect id="p-sm0" class="box" x="434" y="44" width="150" height="246" rx="7"/>
+  <text class="lbl" x="444" y="64">SM 0</text><text id="sch0" class="mut" x="444" y="80"></text>
+  <rect id="p-sm1" class="box" x="594" y="44" width="150" height="246" rx="7"/>
+  <text class="lbl" x="604" y="64">SM 1</text><text id="sch1" class="mut" x="604" y="80"></text>
+  ${slot(0,0)}${slot(0,1)}${slot(1,0)}${slot(1,1)}
+  <text class="mut" x="444" y="284">${tr("regs")}</text><text class="mut" x="604" y="284">${tr("regs")}</text>`;
+}
+function setAttr(id,a,v){ const e=$(id); if(e) e.setAttribute(a,v); }
+function renderMachine(){
+  const st=S.step, p=S.p, parts=new Set(META[st].parts);
+  ["cpu","ram","gmem","cmem","sm0","sm1"].forEach(k=>{ const e=$("p-"+k); e.classList.toggle(k==="cpu"||k==="ram"?"hon":"on", parts.has(k)); e.classList.remove(k==="cpu"||k==="ram"?"on":"hon"); });
+  $("p-bus").classList.toggle("act", parts.has("bus"));
+  // CPU status
+  const cpu=[["cpu_run"],["cpu_read"],["cpu_malloc"],["cpu_copy"],["cpu_const"],["cpu_cfg"],[p<.35?"cpu_launch":"cpu_free"],["cpu_free"],["cpu_free"],["cpu_free"],["cpu_free"],["cpu_free"],["cpu_free"],["cpu_loop"],[p<.4?"cpu_sync":(p<.8?"cpu_back":"cpu_write")]][st][0];
+  $("cpuStat").textContent=tr(cpu);
+  // host buffers
+  const hfill = st===0?0:(st===1?p:1);
+  setAttr("hf0","width",118*hfill); setAttr("hf1","width",118*hfill);
+  // device buffers
+  const vis = st<2?0.25:1, fill = st<3?0:(st===3?p:1);
+  for(let k=0;k<4;k++){ setAttr("bf"+k,"width",148*fill); $("bn"+k).style.opacity = st<2?.3:(st===2?Math.min(1,.3+p*1.4):1); }
+  const sw = (st===13 && sim && sim.n%2===0);
+  $("bn0").textContent=sw?"d_u_new":"d_u"; $("bn2").textContent=sw?"d_u":"d_u_new";
+  $("bn1").textContent=sw?"d_v_new":"d_v"; $("bn3").textContent=sw?"d_v":"d_v_new";
+  if(st===13){ $("bn0").textContent="d_u"; $("bn2").textContent="d_u_new"; $("bn1").textContent="d_v"; $("bn3").textContent="d_v_new";
+    if(sim&&sim.n%2===0){ $("bn0").textContent="d_u_new"; $("bn2").textContent="d_u"; $("bn1").textContent="d_v_new"; $("bn3").textContent="d_v"; } }
+  const cvis = st<4?.3:(st===4?Math.min(1,.3+p*1.4):1);
+  $("cmt").style.opacity=cvis; $("cms").style.opacity=cvis;
+  // packets
+  const pk=[...$("pkts").children];
+  let dir=0, on=false;
+  if(st===3&&p<1){dir=1;on=true;} if(st===4&&p<.6){dir=1;on=true;} if(st===14&&p>=.4&&p<.8){dir=-1;on=true;}
+  pk.forEach((c,k)=>{ if(!on){c.setAttribute("visibility","hidden");return;} const ph=((p*4)+k/5)%1; const x=dir>0?178+ph*58:236-ph*58; c.setAttribute("cx",x); c.setAttribute("visibility", st===4&&k>0?"hidden":"visible"); });
+  // SMs
+  const blkLabel=b=>`${tr("block")} (${b%G.gx},${(b/G.gx)|0})`;
+  const slots=[[null,null],[null,null]]; let sched=[tr("sch_idle"),tr("sch_idle")];
+  const th=threadOf(S.sel.i,S.sel.j);
+  if(st===6){
+    for(let b=0;b<4;b++) if(p>0.12+b*0.17) slots[b%2][(b>>1)&1]={b,st:["ready","ready","ready","ready"]};
+    const waiting = G.nb - slots.flat().filter(Boolean).length;
+    sched=[tr("sch_wait",{n:waiting}),tr("sch_wait",{n:waiting})];
+  } else if(st>=7&&st<=11){
+    const wave=th.b>>2;
+    for(let b=wave*4;b<wave*4+4&&b<G.nb;b++) slots[b%2][(b>>1)&1]={b,st:["ready","ready","ready","ready"]};
+  } else if(st===12){
+    const f=G.frames[Math.min(G.frames.length-1,Math.floor(p*(G.frames.length-1)))];
+    f.sms.forEach((sm,si)=>{ sm.slots.forEach((s,k)=>{ slots[si][k]=s; });
+      sched[si]= sm.iss ? tr("sch_iss",{b:(sm.iss.gw/WPB)|0,w:sm.iss.gw%WPB,op:sm.iss.op}) : (sm.slots.some(Boolean)?tr("sch_stall"):tr("sch_idle")); });
+  } else if(st===13){
+    const n=sim?sim.n:1, ph=n%2;
+    for(let b=0;b<4;b++) slots[b%2][(b>>1)&1]={b:-1,st:[0,1,2,3].map(w=>(w+ph+b)%2?"issue":"ready")};
+    sched=[tr("sch_kern",{n:nf(n)}),tr("sch_kern",{n:nf(n)})];
+  }
+  for(let sm=0;sm<2;sm++){ $("sch"+sm).textContent=sched[sm];
+    for(let k=0;k<2;k++){ const s=slots[sm][k]; $("sl"+sm+k).classList.toggle("res",!!s);
+      $("slt"+sm+k).textContent = s ? (s.b<0?"stepKernel":blkLabel(s.b)) : "";
+      $("sls"+sm+k).textContent = s ? tr("warps4") : "";
+      let ring=-1;
+      for(let w=0;w<4;w++){ const ch=$("ch"+sm+k+w), tx=$("cht"+sm+k+w);
+        ch.style.visibility = tx.style.visibility = s?"visible":"hidden";
+        if(s){ const state=s.st[w]; ch.setAttribute("class","chip "+state); ch.style.fill = state==="issue"?`var(--w${w})`:"";
+          tx.style.fill = state==="issue"?"var(--surface)":""; if(st>=7&&st<=11&&s.b===th.b&&w===th.w) ring=w; }
+      }
+      const rg=$("rg"+sm+k); if(ring>=0){ const x=(sm?604:444)+8+ring*29, y=(k?186:92)+26; rg.setAttribute("x",x); rg.setAttribute("y",y); rg.setAttribute("visibility","visible"); } else rg.setAttribute("visibility","hidden");
+    }
+  }
+  $("machineNote").textContent = st===12 ? tr("gs_tick",{t:G.frames[Math.min(G.frames.length-1,Math.floor(p*(G.frames.length-1)))].t,T:G.frames[G.frames.length-1].t}) : "";
+}
+
+/* ---------------- grid canvas ---------------- */
+const cv=$("cv"), ctx=cv.getContext("2d"), mm=$("mm"), mctx=mm.getContext("2d");
+let C={};
+function hex(h){ h=h.trim(); if(h[0]!=="#") return [128,128,128]; if(h.length===4) h="#"+h[1]+h[1]+h[2]+h[2]+h[3]+h[3]; return [1,3,5].map(k=>parseInt(h.substr(k,2),16)); }
+function readColors(){ const cs=getComputedStyle(document.documentElement); const g=n=>cs.getPropertyValue(n).trim();
+  C={bg:g("--surface"),s2:g("--surface2"),ink:g("--ink"),muted:g("--muted"),line:g("--line"),dev:g("--dev"),host:g("--host"),devs:g("--dev-soft"),hosts:g("--host-soft"),w:[g("--w0"),g("--w1"),g("--w2"),g("--w3")],h:[hex(g("--heat0")),hex(g("--heat1")),hex(g("--heat2"))]}; }
+function heat(x){ let t=Math.max(0,Math.min(1,x/5)); let a,b; if(t<.5){a=C.h[0];b=C.h[1];t*=2;}else{a=C.h[1];b=C.h[2];t=(t-.5)*2;} return `rgb(${a.map((v,k)=>Math.round(v+(b[k]-v)*t)).join(",")})`; }
+function sizeCanvas(c,w,h){ const d=window.devicePixelRatio||1; const W=Math.round(w*d), H=Math.round(h*d); if(c.width!==W||c.height!==H){c.width=W;c.height=H;} return d; }
+function field(){ return (S.step>=13 && sim) ? {u:sim.u,v:sim.v} : {u:U0,v:V0}; }
+
+function drawGrid(){
+  const r=cv.getBoundingClientRect(); if(!r.width) return;
+  const d=sizeCanvas(cv,r.width,r.width); ctx.setTransform(d,0,0,d,0,0);
+  const W=r.width, cs=W/NN, mode=META[S.step].grid, F=field();
+  const th=threadOf(S.sel.i,S.sel.j);
+  ctx.fillStyle=C.bg; ctx.fillRect(0,0,W,W);
+  let frame=null; if(mode==="progress") frame=G.frames[Math.min(G.frames.length-1,Math.floor(S.p*(G.frames.length-1)))];
+  const inflight=new Set(); if(frame) frame.sms.forEach(sm=>sm.slots.forEach(s=>{ if(s) for(let w=0;w<4;w++) inflight.add(s.b*WPB+w); }));
+  for(let i=0;i<NN;i++) for(let j=0;j<NN;j++){
+    const c=i*NN+j, x=j*cs, y=i*cs, b=G.cB[c], w=G.cW[c]%WPB;
+    ctx.globalAlpha=1;
+    if(mode==="values"||mode==="live"){ ctx.fillStyle=heat(F.u[c]); ctx.fillRect(x,y,cs+.5,cs+.5); }
+    else if(mode==="blocks"){ ctx.fillStyle=heat(F.u[c]); ctx.globalAlpha=.35; ctx.fillRect(x,y,cs+.5,cs+.5); ctx.globalAlpha=.30; ctx.fillStyle=(((b%G.gx)+((b/G.gx)|0))%2)?C.dev:C.host; ctx.fillRect(x,y,cs+.5,cs+.5); }
+    else if(mode==="sm"){ const wave=b>>2, prog=S.p>0.12+(b%4)*0.17; ctx.fillStyle=C.s2; ctx.fillRect(x,y,cs+.5,cs+.5);
+      if(wave===0&&prog){ ctx.globalAlpha=.45; ctx.fillStyle=b%2?C.host:C.dev; ctx.fillRect(x,y,cs+.5,cs+.5); }
+      else { ctx.globalAlpha=.5; ctx.strokeStyle=C.line; ctx.beginPath(); ctx.moveTo(x,y+cs); ctx.lineTo(x+cs,y); ctx.stroke(); } }
+    else if(mode==="warps"||mode==="boundary"){ ctx.fillStyle=C.w[w]; ctx.globalAlpha=(mode==="boundary"?.35:.75)*((b%2)?.8:1); ctx.fillRect(x,y,cs+.5,cs+.5);
+      if(mode==="boundary"&&isBnd(c)){ ctx.globalAlpha=1; ctx.fillStyle=C.s2; ctx.fillRect(x,y,cs+.5,cs+.5); ctx.strokeStyle=C.muted; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(x+2,y+2); ctx.lineTo(x+cs-2,y+cs-2); ctx.moveTo(x+cs-2,y+2); ctx.lineTo(x+2,y+cs-2); ctx.stroke(); } }
+    else if(mode==="stencil"){ ctx.fillStyle=heat(F.u[c]); ctx.globalAlpha=.4; ctx.fillRect(x,y,cs+.5,cs+.5); }
+    else if(mode==="progress"){ const gw=G.cW[c];
+      if(frame.done[gw]){ ctx.fillStyle=heat(U1[c]); ctx.fillRect(x,y,cs+.5,cs+.5); }
+      else if(inflight.has(gw)){ ctx.fillStyle=C.w[w]; ctx.globalAlpha=.3; ctx.fillRect(x,y,cs+.5,cs+.5); }
+      else { ctx.fillStyle=C.s2; ctx.fillRect(x,y,cs+.5,cs+.5); } }
+  }
+  ctx.globalAlpha=1;
+  // block borders
+  if(["blocks","sm","warps","boundary","progress"].includes(mode)){
+    ctx.strokeStyle=C.ink; ctx.lineWidth=1.4; ctx.globalAlpha=.55;
+    for(let b=0;b<G.nb;b++){ const bxi=b%G.gx, byi=(b/G.gx)|0; let x0=bxi*G.bx, y0=byi*G.by, w=G.bx, h=G.by; if(S.swap){ [x0,y0]=[y0,x0]; [w,h]=[h,w]; }
+      ctx.strokeRect(x0*cs+.7,y0*cs+.7,w*cs-1.4,h*cs-1.4); }
+    ctx.globalAlpha=1;
+    if(mode==="blocks" && cs>=8){ ctx.fillStyle=C.ink; ctx.font=`600 ${Math.max(10,cs*0.9)}px ${getComputedStyle(document.body).getPropertyValue("--mono")||"monospace"}`;
+      for(let b=0;b<G.nb;b++){ const bxi=b%G.gx, byi=(b/G.gx)|0; let x0=bxi*G.bx, y0=byi*G.by; if(S.swap) [x0,y0]=[y0,x0]; ctx.fillText(`(${bxi},${byi})`, x0*cs+5, y0*cs+cs*1.1+3); } }
+  }
+  // selected warp + stencil
+  if(["warps","boundary","stencil"].includes(mode)){
+    ctx.strokeStyle=C.ink; ctx.lineWidth=2;
+    G.wCells[th.gw].forEach(c=>{ const i=(c/NN)|0, j=c%NN; ctx.strokeRect(j*cs+1,i*cs+1,cs-2,cs-2); });
+  }
+  if(mode==="stencil" && !isBnd(th.c)){
+    ctx.fillStyle=heat(F.u[th.c]); ctx.fillRect(S.sel.j*cs,S.sel.i*cs,cs,cs);
+    ctx.fillStyle=C.ink;
+    [[-1,0],[1,0],[0,-1],[0,1]].forEach(([di,dj])=>{ const i=S.sel.i+di, j=S.sel.j+dj; ctx.fillStyle=heat(F.u[i*NN+j]); ctx.fillRect(j*cs,i*cs,cs,cs); ctx.fillStyle=C.ink; ctx.beginPath(); ctx.arc(j*cs+cs/2,i*cs+cs/2,Math.max(2,cs*.18),0,7); ctx.fill(); });
+  }
+  // ring around selected
+  ctx.strokeStyle=C.bg; ctx.lineWidth=4; ctx.strokeRect(S.sel.j*cs-1,S.sel.i*cs-1,cs+2,cs+2);
+  ctx.strokeStyle=C.ink; ctx.lineWidth=2; ctx.strokeRect(S.sel.j*cs-1,S.sel.i*cs-1,cs+2,cs+2);
+  // legend + stat
+  const lg={values:"lg_values",live:"lg_live",blocks:"lg_blocks",sm:"lg_sm",warps:"lg_warps",boundary:"lg_boundary",stencil:"lg_stencil",progress:"lg_progress"}[mode];
+  $("legend").textContent=tr(lg,{bx:G.bx,by:G.by});
+  $("gridStat").textContent = (S.step>=13&&sim) ? tr("gs_live",{n:nf(sim.n),t:(sim.n*PRM.dt).toFixed(2)}) : tr("gs_size");
+}
+
+function memStats(){
+  const th=threadOf(S.sel.i,S.sel.j), cells=G.wCells[th.gw].filter(c=>!isBnd(c));
+  const sec=new Set(cells.map(c=>c>>2));
+  const v={b:th.b,w:th.w,lanes:cells.length,used:cells.length*8,sec:sec.size,fetch:sec.size*32,eff:sec.size?Math.round(100*cells.length*8/(sec.size*32)):0};
+  return {sec, cells:new Set(cells), html: cells.length?tr("mm_stat",v):tr("mm_none",v)};
+}
+function drawMem(){
+  const r=mm.getBoundingClientRect(); if(!r.width) return;
+  const H=r.width*7/8; const d=sizeCanvas(mm,r.width,H); mctx.setTransform(d,0,0,d,0,0);
+  const cw=r.width/8, rh=H/NN, ms=memStats();
+  mctx.fillStyle=C.s2; mctx.fillRect(0,0,r.width,H);
+  for(let row=0;row<NN;row++) for(let s=0;s<8;s++){
+    const id=row*8+s, x=s*cw, y=row*rh;
+    if(ms.sec.has(id)){ mctx.fillStyle=C.devs; mctx.fillRect(x+.5,y+.5,cw-1,rh-1);
+      for(let q=0;q<4;q++){ const c=id*4+q; if(ms.cells.has(c)){ mctx.fillStyle=C.dev; mctx.fillRect(x+1+q*(cw-2)/4,y+1,(cw-2)/4-1,rh-2); } } }
+    else { mctx.strokeStyle=C.line; mctx.lineWidth=.6; mctx.strokeRect(x+.5,y+.5,cw-1,rh-1); }
+  }
+  $("mmStat").innerHTML=ms.html;
+}
+
+/* ---------------- inspector ---------------- */
+function renderInspector(){
+  const th=threadOf(S.sel.i,S.sel.j), F=field(), c=th.c, bnd=isBnd(c);
+  const rows=[[tr("i_block"),`(${th.bxi}, ${th.byi})`],[tr("i_thread"),`(${th.tx}, ${th.ty})`],[tr("i_warp"),`w${th.w} · ${th.lane}`],[tr("i_sm"),`SM ${th.sm}`],
+    [tr("i_ij"),`(${S.sel.i}, ${S.sel.j})`],[tr("i_idx"),`${c} · ${nf(c*8)} B`],
+    [tr("i_status"), bnd?`<span class="tag" style="color:var(--muted)">${tr("st_bnd")}</span>`:`<span class="tag" style="color:var(--w2)">${tr("st_act")}</span>`]];
+  const uc=F.u[c], vc=F.v[c]; rows.push(["uc · vc",`${fmt(uc,4)} · ${fmt(vc,4)}`]);
+  if(!bnd){ const u=F.u, lu=(u[c+NN]-2*uc+u[c-NN])*PRM.idx2+(u[c+1]-2*uc+u[c-1])*PRM.idy2, uuv=uc*uc*vc, un=uc+PRM.dt*(PRM.Du*lu+PRM.A-(PRM.B+1)*uc+uuv);
+    rows.push(["lap_u",fmt(lu,2)],["uuv",fmt(uuv,4)],["u_new[idx]",fmt(un,6)]); }
+  $("insp").innerHTML=rows.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join("");
+}
+
+/* ---------------- static text ---------------- */
+function renderStatic(){
+  document.documentElement.lang=S.lang;
+  document.querySelectorAll("[data-i]").forEach(e=>e.textContent=tr(e.dataset.i));
+  $("footer").innerHTML=tr("footer");
+  $("langBtn").textContent=S.lang==="es"?"EN":"ES";
+  const g=$("gloss"); g.innerHTML=`<h3>${tr("g_title")}</h3>`+GLOSS[S.lang].map(([k,v])=>`<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+  buildSVG();
+}
+function playLabel(){ $("play").textContent = S.playing ? tr("pause") : (S.step===LAST&&S.p>=1 ? tr("replay") : tr("play")); }
+
+/* ---------------- flow ---------------- */
+function enter(k){
+  S.step=Math.max(0,Math.min(LAST,k)); S.p=0; S.hold=0;
+  if(S.step<13) sim=null;
+  if(S.step===13) resetSim();
+  if(S.step===14 && (!sim || sim.n<2)){ resetSim(); runSimTo(LIVE_STEPS); }
+  renderCode(); renderText(); renderAll(); playLabel();
+}
+/* ---------------- Forward Euler math box ---------------- */
+const CODE_REF={en:"In the code: kernel lines 13–18. Each GPU thread does exactly this, for its own node only.",es:"En el código: líneas 13–18 del kernel. Cada hilo de la GPU hace exactamente esto, solo para su nodo."};
+function fr(a,b){return `<span class="frac"><span>${a}</span><span>${b}</span></span>`;}
+function fm(x){ if(x!==0&&Math.abs(x)<1e-3) return x.toExponential(2); return x.toFixed(4); }
+function renderMath(){
+  const es=S.lang==="es", L=(e,s)=>es?s:e, F=field(), i=S.sel.i, j=S.sel.j, c=i*NN+j;
+  const U="<i>U</i>", V="<i>V</i>", n="<sup><i>n</i></sup>", n1="<sup><i>n</i>+1</sup>", dt="Δ<i>t</i>", sb=s=>`<sub>${s}</sub>`;
+  $("mathSub").textContent=L("the formula behind every thread","la fórmula detrás de cada hilo");
+  let h=`<div><p class="mstep">1 · ${L("The model","El modelo")}</p>
+   <div class="m">${fr("∂"+U,"∂<i>t</i>")} = <span class="dif"><i>D</i>${sb("<i>U</i>")} ∇²${U}</span> + <span class="rea"><i>A</i> + ${U}²${V} − (<i>B</i> + 1)${U}</span></div>
+   <div class="m">${fr("∂"+V,"∂<i>t</i>")} = <span class="dif"><i>D</i>${sb("<i>V</i>")} ∇²${V}</span> + <span class="rea"><i>B</i>${U} − ${U}²${V}</span></div>
+   <p class="mnote">${L(`<span class="dif">Diffusion</span>: each species spreads toward neighbouring nodes. <span class="rea">Reaction</span>: the species turn into each other at the same node. A = ${PRM.A}, B = ${PRM.B}.`,`<span class="dif">Difusión</span>: cada especie se reparte hacia los nodos vecinos. <span class="rea">Reacción</span>: las especies se transforman una en otra en el mismo nodo. A = ${PRM.A}, B = ${PRM.B}.`)}</p></div>`;
+  h+=`<div><p class="mstep">2 · ${L("Forward Euler in time","Forward Euler en el tiempo")}</p>
+   <div class="m">${fr("∂"+U,"∂<i>t</i>")} ≈ ${fr(U+n1+" − "+U+n, dt)} &nbsp;⇒&nbsp; ${U}${n1} = ${U}${n} + ${dt} · <i>f</i>(${U}${n}, ${V}${n})</div>
+   <p class="mnote">${L(`Replace the derivative by the change over one small step Δt = ${PRM.dt}, then solve for the new value. <i>f</i> is the whole right side of the model. It only uses values from step <i>n</i>, so the method is <b>explicit</b>: every node can be computed on its own, at the same time as all the others. That is why it parallelises so well.`,`Se cambia la derivada por el cambio en un paso pequeño Δt = ${PRM.dt} y se despeja el valor nuevo. <i>f</i> es todo el lado derecho del modelo. Solo usa valores del paso <i>n</i>, así que el método es <b>explícito</b>: cada nodo se calcula por su cuenta, a la vez que todos los demás. Por eso se paraleliza tan bien.`)}</p></div>`;
+  h+=`<div><p class="mstep">3 · ${L("Laplacian in space: 5-point stencil","Laplaciano en el espacio: stencil de 5 puntos")}</p>
+   <div class="m">∇²${U}${sb("<i>i,j</i>")} ≈ ${fr(U+sb("<i>i</i>+1,<i>j</i>")+" − 2"+U+sb("<i>i,j</i>")+" + "+U+sb("<i>i</i>−1,<i>j</i>"),"Δ<i>x</i>²")} + ${fr(U+sb("<i>i,j</i>+1")+" − 2"+U+sb("<i>i,j</i>")+" + "+U+sb("<i>i,j</i>−1"),"Δ<i>y</i>²")}</div>
+   <p class="mnote">${L("A second derivative is approximated by (neighbour − 2 × centre + other neighbour) / spacing². It compares the node with its 4 neighbours: it is positive when the node is lower than its surroundings, so diffusion raises it.","Una segunda derivada se aproxima con (vecino − 2 × centro + otro vecino) / espaciado². Compara el nodo con sus 4 vecinos: es positivo cuando el nodo está más bajo que su entorno, así que la difusión lo sube.")}</p></div>`;
+  h+=`<div><p class="mstep">4 · ${L("With numbers","Con números")} · ${L("node","nodo")} (${i}, ${j})</p>`;
+  if(isBnd(c)){
+    h+=`<p class="mnote">${L("This node is on the boundary. It is never updated and keeps its value U0 (Dirichlet condition). Click an interior cell of the grid.","Este nodo está en la frontera. Nunca se actualiza y conserva su valor U0 (condición de Dirichlet). Haz clic en una celda interior de la malla.")}</p></div>`;
+  } else {
+    const u=F.u,v=F.v,uc=u[c],vc=v[c],up=u[c-NN],dn=u[c+NN],lf=u[c-1],rt=u[c+1];
+    const lu=(dn-2*uc+up)*PRM.idx2+(rt-2*uc+lf)*PRM.idy2;
+    const lv=(v[c+NN]-2*vc+v[c-NN])*PRM.idx2+(v[c+1]-2*vc+v[c-1])*PRM.idy2;
+    const ru=PRM.A+uc*uc*vc-(PRM.B+1)*uc, rv=PRM.B*uc-uc*uc*vc, du=PRM.Du*lu, dv=PRM.Dv*lv;
+    const un=uc+PRM.dt*(du+ru), vn=vc+PRM.dt*(dv+rv), f3=x=>x.toFixed(3);
+    h+=`<div class="cross"><span class="c0"></span><span>${f3(up)}</span><span class="c0"></span><span>${f3(lf)}</span><span class="cc">${f3(uc)}</span><span>${f3(rt)}</span><span class="c0"></span><span>${f3(dn)}</span><span class="c0"></span></div>
+<div class="num">∇²U ≈ (${f3(dn)} − 2·${f3(uc)} + ${f3(up)})·${PRM.idx2}
+    + (${f3(rt)} − 2·${f3(uc)} + ${f3(lf)})·${PRM.idy2} = ${fm(lu)}
+<span class="dif">D_U·∇²U</span>        = ${PRM.Du} · ${fm(lu)} = <span class="dif">${fm(du)}</span>
+<span class="rea">A + U²V − (B+1)U</span> = 1 + ${f3(uc)}²·${f3(vc)} − 4·${f3(uc)} = <span class="rea">${fm(ru)}</span>
+U<sup>n+1</sup> = ${fm(uc)} + ${PRM.dt}·(<span class="dif">${fm(du)}</span> + <span class="rea">${fm(ru)}</span>) = <b>${un.toFixed(6)}</b>
+V<sup>n+1</sup> = ${fm(vc)} + ${PRM.dt}·(<span class="dif">${fm(dv)}</span> + <span class="rea">${fm(rv)}</span>) = <b>${vn.toFixed(6)}</b></div>
+<p class="mnote">${CODE_REF[S.lang]} ${L("On this toy grid Δx = 1/32, so 1/Δx² = 1024.","En esta malla de juguete Δx = 1/32, así que 1/Δx² = 1024.")}</p></div>`;
+  }
+  h+=`<p class="mnote mfull">${L(`<b>Stability.</b> An explicit method only works if Δt is small enough. For 2-D diffusion the rule is D·Δt/Δx² ≤ 1/4. In the real run, with Δx = 1/1024: D<sub>U</sub>·Δt/Δx² = 5·10⁻⁵ · 0.0025 · 1024² ≈ 0.131 ≤ 0.25 ✓. With a Δt about twice as large, the numbers would start to oscillate and blow up.`,`<b>Estabilidad.</b> Un método explícito solo funciona si Δt es suficientemente pequeño. Para difusión en 2-D la regla es D·Δt/Δx² ≤ 1/4. En la ejecución real, con Δx = 1/1024: D<sub>U</sub>·Δt/Δx² = 5·10⁻⁵ · 0,0025 · 1024² ≈ 0,131 ≤ 0,25 ✓. Con un Δt del doble, los números empezarían a oscilar y explotarían.`)}</p>`;
+  $("mathBody").innerHTML=h;
+}
+/* ---------------- thread-ID mini simulation ---------------- */
+const CMI={n:4,m:6,bx:3,by:2}, CMS={tick:0,acc:0,paused:false};
+const CML=(()=>{const n=CMI.n,m=CMI.m,bx=CMI.bx,by=CMI.by,L=[];
+  for(let byi=0;byi<n/by;byi++)for(let bxi=0;bxi<m/bx;bxi++)for(let ty=0;ty<by;ty++)for(let tx=0;tx<bx;tx++){
+    const j=bxi*bx+tx,i=byi*by+ty;L.push({bxi,byi,tx,ty,i,j,idx:i*m+j,act:!(i<1||i>=n-1||j<1||j>=m-1)});}
+  return L;})();
+function miniUpdate(dt){ if(CMS.paused) return; CMS.acc+=dt*S.speed; if(CMS.acc<1100) return; CMS.acc=0; CMS.tick=(CMS.tick+1)%(CML.length+3); drawMini(); }
+function drawMini(){
+  const es=S.lang==="es",L2=(e,s)=>es?s:e,n=CMI.n,m=CMI.m,bx=CMI.bx,by=CMI.by;
+  const all=CMS.tick>=CML.length,cur=all?null:CML[CMS.tick],mono='"IBM Plex Mono",ui-monospace,monospace',nAct=CML.filter(t=>t.act).length;
+  const g=$("miniGrid"),gr=g.getBoundingClientRect();
+  if(gr.width){const d=sizeCanvas(g,gr.width,gr.height),x=g.getContext("2d");x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,gr.width,gr.height);
+    const cs=28,ox=26,oy=18;x.font=`10px ${mono}`;x.textAlign="center";x.textBaseline="middle";x.fillStyle=C.muted;
+    for(let j=0;j<m;j++)x.fillText("j="+j,ox+(j+.5)*cs,oy/2);
+    for(let i=0;i<n;i++)x.fillText("i="+i,ox/2,oy+(i+.5)*cs);
+    CML.forEach(t=>{const px=ox+t.j*cs,py=oy+t.i*cs,col=((t.bxi+t.byi)%2)?C.host:C.dev,on=all?t.act:(cur===t);
+      x.globalAlpha=on?1:(t.act?.22:.07);x.fillStyle=col;x.fillRect(px+1,py+1,cs-2,cs-2);x.globalAlpha=1;
+      if(cur===t){x.strokeStyle=C.ink;x.lineWidth=2;x.strokeRect(px+1.5,py+1.5,cs-3,cs-3);x.lineWidth=1;}
+      x.fillStyle=on?C.bg:(t.act?C.ink:C.muted);x.fillText(`${t.tx},${t.ty}`,px+cs/2,py+cs/2+1);});
+    x.strokeStyle=C.ink;x.globalAlpha=.6;x.lineWidth=1.5;
+    for(let byi=0;byi<n/by;byi++)for(let bxi=0;bxi<m/bx;bxi++)x.strokeRect(ox+bxi*bx*cs+.75,oy+byi*by*cs+.75,bx*cs-1.5,by*cs-1.5);
+    x.globalAlpha=1;x.lineWidth=1;}
+  const st=$("miniStrip"),sr=st.getBoundingClientRect();
+  if(sr.width){const d=sizeCanvas(st,sr.width,sr.height),x=st.getContext("2d");x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,sr.width,sr.height);
+    x.font=`10px ${mono}`;x.textBaseline="middle";
+    const gap=6,w=Math.min(30,(sr.width-2-gap*(n-1))/(n*m)),bh=22,nb=new Set();
+    if(cur&&cur.act)[cur.idx-1,cur.idx+1,cur.idx-m,cur.idx+m].forEach(v=>nb.add(v));
+    for(let idx=0;idx<n*m;idx++){const i=Math.floor(idx/m),px=1+idx*w+i*gap;
+      const on=all?CML.some(t=>t.act&&t.idx===idx):(cur&&cur.idx===idx);
+      x.fillStyle=on?C.dev:(nb.has(idx)?C.hosts:C.bg);x.fillRect(px+1,2,w-2,bh);
+      x.strokeStyle=nb.has(idx)?C.host:C.line;x.strokeRect(px+1.5,2.5,w-3,bh-1);
+      x.textAlign="center";x.fillStyle=on?C.bg:C.ink;x.fillText(String(idx),px+w/2,2+bh/2+1);}
+    x.textAlign="left";x.fillStyle=C.muted;
+    for(let i=0;i<n;i++)x.fillText(`${L2("row","fila")} i=${i}`,1+i*m*w+i*gap+2,bh+15);}
+  $("miniTitle").textContent=L2("From thread IDs to (i, j) and idx","De los IDs del hilo a (i, j) e idx");
+  $("miniPause").textContent=CMS.paused?"▶":"⏸";
+  $("miniCode").textContent= all
+    ? L2(`// all ${CML.length} threads run at the same time:\n//   ${nAct} compute their node (filled)\n//   ${CML.length-nAct} are on the border and return`,`// los ${CML.length} hilos corren a la vez:\n//   ${nAct} calculan su nodo (rellenos)\n//   ${CML.length-nAct} están en el borde y hacen return`)
+    : `blockIdx = (${cur.bxi}, ${cur.byi})   threadIdx = (${cur.tx}, ${cur.ty})\n`+
+      `j   = blockIdx.x*blockDim.x + threadIdx.x = ${cur.bxi}*${bx} + ${cur.tx} = ${cur.j}\n`+
+      `i   = blockIdx.y*blockDim.y + threadIdx.y = ${cur.byi}*${by} + ${cur.ty} = ${cur.i}\n`+
+      `if (i < 1 || i >= n-1 || j < 1 || j >= m-1) return;  → ${cur.act?L2("continues","sigue"):"return"}\n`+
+      (cur.act?`idx = i*m + j = ${cur.i}*${m} + ${cur.j} = ${cur.idx}\n${L2("reads","lee")} u[${cur.idx-m}] u[${cur.idx-1}] u[${cur.idx}] u[${cur.idx+1}] u[${cur.idx+m}] → ${L2("writes","escribe")} u_new[${cur.idx}]`
+              :L2("// this thread stops here: its node keeps U0","// este hilo termina aquí: su nodo conserva U0"));
+  $("miniNote").innerHTML=L2(`<b>There is no loop.</b> The GPU starts all ${CML.length} threads at once and each one evaluates these lines with its own IDs. Here they are shown one at a time, then all together. Each cell shows threadIdx (x,y); tiles are blocks. Toy: n = ${n}, m = ${m}, block(${bx}, ${by}), grid(${m/bx}, ${n/by}). Real run: 1024 × 1024 = 1,048,576 threads. Click a cell to pick a thread.`,
+    `<b>No hay bucle.</b> La GPU arranca los ${CML.length} hilos a la vez y cada uno evalúa estas líneas con sus propios IDs. Aquí se muestran de uno en uno y luego todos juntos. Cada celda muestra threadIdx (x,y); las baldosas son bloques. Juguete: n = ${n}, m = ${m}, block(${bx}, ${by}), grid(${m/bx}, ${n/by}). Ejecución real: 1024 × 1024 = 1.048.576 hilos. Haz clic en una celda para elegir un hilo.`);
+}
+$("miniPause").onclick=()=>{ CMS.paused=!CMS.paused; drawMini(); };
+$("miniGrid").addEventListener("click",e=>{ const r=$("miniGrid").getBoundingClientRect(), j=Math.floor((e.clientX-r.left-26)/28), i=Math.floor((e.clientY-r.top-18)/28);
+  const q=CML.findIndex(t=>t.i===i&&t.j===j); if(q>=0){ CMS.tick=q; CMS.paused=true; drawMini(); } });
+new ResizeObserver(()=>drawMini()).observe($("miniStrip"));
+function renderAll(){ renderMachine(); drawGrid(); drawMem(); renderInspector(); renderMath(); drawMini(); $("bar").style.width=(S.p*100)+"%"; }
+
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(100,now-last); last=now; miniUpdate(dt);
+  if(S.p<1){
+    S.p=Math.min(1,S.p+dt*S.speed/META[S.step].d);
+    if(S.step===13){ runSimTo(1+Math.floor(S.p*LIVE_STEPS)); }
+    renderAll();
+    if(S.step===13 && S.p>=1) renderInspector();
+  } else if(S.playing){
+    S.hold+=dt*S.speed;
+    if(S.hold>900){ if(S.step<LAST) enter(S.step+1); else { S.playing=false; playLabel(); } }
+  }
+  requestAnimationFrame(loop);
+}
+
+/* ---------------- events ---------------- */
+$("prev").onclick=()=>{ S.playing=false; enter(S.step-1); };
+$("next").onclick=()=>{ S.playing=false; enter(S.step+1); };
+$("play").onclick=()=>{
+  if(S.playing){ S.playing=false; }
+  else { if(S.step===LAST&&S.p>=1){ S.playing=true; enter(0); return; } S.playing=true; if(S.p>=1) S.hold=0; }
+  playLabel();
+};
+$("speeds").onclick=e=>{ const b=e.target.closest("button"); if(!b) return; S.speed=+b.dataset.speed; [...$("speeds").children].forEach(x=>x.setAttribute("aria-pressed",x===b)); };
+$("shapes").onclick=e=>{ const b=e.target.closest("button"); if(!b) return; S.shape=b.dataset.shape; [...$("shapes").children].forEach(x=>x.setAttribute("aria-pressed",x===b)); buildGeo(); renderCode(); renderText(); renderAll(); };
+$("swap").onchange=e=>{ S.swap=e.target.checked; buildGeo(); renderCode(); renderText(); renderAll(); };
+$("reseed").onclick=()=>{ S.seed=(S.seed*7919+13)%100003; initField(); if(S.step>=13){ resetSim(); if(S.step===14) runSimTo(LIVE_STEPS); else runSimTo(1+Math.floor(S.p*LIVE_STEPS)); } renderAll(); };
+$("langBtn").onclick=()=>{ S.lang=S.lang==="es"?"en":"es"; try{localStorage.setItem("cm-lang",S.lang);}catch(e){} renderStatic(); renderCode(); renderText(); renderAll(); playLabel(); };
+$("glossBtn").onclick=()=>{ $("gloss").hidden=!$("gloss").hidden; };
+cv.addEventListener("click",e=>{ const r=cv.getBoundingClientRect(); const j=Math.floor((e.clientX-r.left)/r.width*NN), i=Math.floor((e.clientY-r.top)/r.height*NN);
+  if(i>=0&&i<NN&&j>=0&&j<NN){ S.sel={i,j}; renderText(); renderAll(); } });
+document.addEventListener("keydown",e=>{ if(e.target.closest("input,textarea,select,summary")) return;
+  if(e.key==="ArrowRight"){ S.playing=false; enter(S.step+1); } else if(e.key==="ArrowLeft"){ S.playing=false; enter(S.step-1); }
+  else if(e.key===" "&&!e.target.closest("button")){ e.preventDefault(); $("play").click(); } });
+const rail=$("rail"); for(let k=0;k<=LAST;k++){ const b=document.createElement("button"); b.setAttribute("aria-label",`Step ${k+1}`); b.onclick=()=>{ S.playing=false; enter(k); }; rail.appendChild(b); }
+new ResizeObserver(()=>{ drawGrid(); drawMem(); }).observe(cv.parentElement);
+const retheme=()=>{ readColors(); drawGrid(); drawMem(); };
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",retheme);
+new MutationObserver(retheme).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
+if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>renderAll());
+
+/* ---------------- boot ---------------- */
+readColors(); initField(); buildGeo(); renderStatic(); enter(0); S.p=1; renderAll(); playLabel();
+requestAnimationFrame(t=>{ last=t; requestAnimationFrame(loop); });
+})();
+</script>
+</body>
+</html>

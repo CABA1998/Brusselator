@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Interactive simulations of how the Brusselator reaction-diffusion solver runs on a GPU (CUDA) and on a multicore CPU (OpenMP).">
+<title>Brusselator · CUDA &amp; OpenMP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=STIX+Two+Text:ital@0;1&display=swap">
+<style>
+/* Layout: a short title block, the model in one line of math, then two cards side by side (stacked on phones). */
+:root{
+  color-scheme:light;
+  --bg:#ECEEF2; --surface:#FFFFFF; --ink:#161B26; --muted:#5A6373; --line:#D2D7E0;
+  --gpu:#3550C8; --cpu:#6A3FC2; --copper:#B4581F;
+  --display:"Chakra Petch","Segoe UI",system-ui,sans-serif;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root{--bg:#0E1117;--surface:#161A22;--ink:#E5E8EE;--muted:#959DAC;--line:#2C323D;--gpu:#7F95FF;--cpu:#A98BFF;--copper:#E58B52;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6}
+.wrap{max-width:1040px;margin:0 auto;padding-block:max(40px,env(safe-area-inset-top,0px)) 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:28px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.eyebrow{font-family:var(--mono);font-size:13px;color:var(--muted);margin:0 0 6px}
+h1{font-family:var(--display);font-weight:700;font-size:clamp(32px,6vw,52px);line-height:1.05;margin:0;letter-spacing:.01em;text-wrap:balance}
+h1 .g{color:var(--gpu)} h1 .c{color:var(--cpu)}
+.lead{max-width:62ch;margin:12px 0 0;color:var(--muted);font-size:17px}
+.lang{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit;font-size:14px;color:inherit}
+.eq{font-family:"STIX Two Text","Cambria Math","Times New Roman",serif;font-size:19px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 18px;overflow-x:auto;white-space:nowrap}
+.eq i{font-style:italic}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px}
+.card{display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;color:inherit;text-decoration:none;transition:border-color .2s,transform .2s;min-width:0}
+.card:hover,.card:focus-visible{transform:translateY(-2px);outline:none}
+.card.gpu:hover,.card.gpu:focus-visible{border-color:var(--gpu)}
+.card.cpu:hover,.card.cpu:focus-visible{border-color:var(--cpu)}
+.tag{font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+.gpu .tag{color:var(--gpu)} .cpu .tag{color:var(--cpu)}
+.card h2{font-family:var(--display);font-size:26px;margin:0;line-height:1.15}
+.card p{margin:0;color:var(--muted)}
+.card ul{margin:0;padding-left:18px;color:var(--ink);font-size:15px}
+.go{margin-top:auto;font-weight:600}
+.gpu .go{color:var(--gpu)} .cpu .go{color:var(--cpu)}
+svg{display:block;width:100%;height:auto;max-width:100%}
+footer{color:var(--muted);font-size:14px}
+footer a{color:inherit}
+@media (prefers-reduced-motion: reduce){.card{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <p class="eyebrow" data-i="eyebrow"></p>
+      <h1><span data-i="h1a"></span> <span class="g">GPU</span> <span data-i="h1b"></span> <span class="c">CPU</span></h1>
+      <p class="lead" data-i="lead"></p>
+    </div>
+    <button class="lang" id="lang" aria-label="Language">ES</button>
+  </header>
+
+  <div class="eq" aria-label="Brusselator equations">
+    ∂<i>U</i>/∂<i>t</i> = <i>D<sub>U</sub></i>∇²<i>U</i> + <i>A</i> + <i>U</i>²<i>V</i> − (<i>B</i>+1)<i>U</i>
+    &nbsp;&nbsp;·&nbsp;&nbsp;
+    ∂<i>V</i>/∂<i>t</i> = <i>D<sub>V</sub></i>∇²<i>V</i> + <i>BU</i> − <i>U</i>²<i>V</i>
+  </div>
+
+  <section class="cards">
+    <a class="card gpu" href="cuda.html">
+      <svg viewBox="0 0 320 90" aria-hidden="true">
+        <rect x="1" y="1" width="318" height="88" rx="8" fill="none" stroke="currentColor" stroke-opacity=".18"/>
+        <g fill="var(--gpu)">
+          <rect x="14" y="14" width="60" height="12" rx="3"/><rect x="14" y="30" width="60" height="12" rx="3" opacity=".7"/><rect x="14" y="46" width="60" height="12" rx="3" opacity=".5"/><rect x="14" y="62" width="60" height="12" rx="3" opacity=".3"/>
+        </g>
+        <g fill="none" stroke="var(--gpu)" stroke-width="1.5">
+          <rect x="96" y="14" width="98" height="60" rx="6"/><rect x="210" y="14" width="98" height="60" rx="6"/>
+        </g>
+        <g fill="var(--gpu)">
+          <rect x="106" y="34" width="18" height="16" rx="3"/><rect x="128" y="34" width="18" height="16" rx="3" opacity=".5"/><rect x="150" y="34" width="18" height="16" rx="3"/><rect x="172" y="34" width="12" height="16" rx="3" opacity=".3"/>
+          <rect x="220" y="34" width="18" height="16" rx="3" opacity=".5"/><rect x="242" y="34" width="18" height="16" rx="3"/><rect x="264" y="34" width="18" height="16" rx="3" opacity=".3"/><rect x="286" y="34" width="12" height="16" rx="3"/>
+        </g>
+        <g fill="var(--copper)"><rect x="106" y="56" width="78" height="6" rx="3" opacity=".6"/><rect x="220" y="56" width="78" height="6" rx="3" opacity=".6"/></g>
+      </svg>
+      <span class="tag">CUDA · 15 <span data-i="steps"></span></span>
+      <h2>CUDA Machine</h2>
+      <p data-i="gpuP"></p>
+      <ul data-i="gpuL"></ul>
+      <span class="go" data-i="open"></span>
+    </a>
+    <a class="card cpu" href="openmp.html">
+      <svg viewBox="0 0 320 90" aria-hidden="true">
+        <rect x="1" y="1" width="318" height="88" rx="8" fill="none" stroke="currentColor" stroke-opacity=".18"/>
+        <g fill="none" stroke="var(--cpu)" stroke-width="1.5">
+          <rect x="14" y="12" width="66" height="44" rx="5"/><rect x="88" y="12" width="66" height="44" rx="5"/><rect x="162" y="12" width="66" height="44" rx="5"/><rect x="236" y="12" width="70" height="44" rx="5"/>
+        </g>
+        <g fill="var(--cpu)">
+          <rect x="20" y="20" width="26" height="14" rx="3"/><rect x="50" y="20" width="24" height="14" rx="3" opacity=".5"/>
+          <rect x="94" y="20" width="26" height="14" rx="3" opacity=".7"/><rect x="124" y="20" width="24" height="14" rx="3"/>
+          <rect x="168" y="20" width="26" height="14" rx="3"/><rect x="198" y="20" width="24" height="14" rx="3" opacity=".4"/>
+          <rect x="242" y="20" width="28" height="14" rx="3" opacity=".6"/><rect x="274" y="20" width="26" height="14" rx="3"/>
+        </g>
+        <rect x="14" y="64" width="292" height="14" rx="4" fill="var(--copper)" opacity=".35"/>
+      </svg>
+      <span class="tag">OpenMP · 13 <span data-i="steps"></span></span>
+      <h2>OpenMP Machine</h2>
+      <p data-i="cpuP"></p>
+      <ul data-i="cpuL"></ul>
+      <span class="go" data-i="open"></span>
+    </a>
+  </section>
+
+  <footer data-i="foot"></footer>
+</div>
+<script>
+(function(){
+  var T={
+    en:{eyebrow:"Brusselator reaction-diffusion · Forward Euler · 5-point stencil",h1a:"One PDE solver, on a",h1b:"and on a",
+      lead:"Two interactive, step-by-step simulations of the same C++ solver. Follow one grid node from memory to the arithmetic units and back, and see why each machine is fast where it is.",
+      steps:"steps",open:"Open simulation →",
+      gpuP:"The CUDA kernel on a toy GPU with 2 streaming multiprocessors.",
+      gpuL:"<li>Host ↔ device copies over PCIe</li><li>Grid, blocks, warps and lanes</li><li>Coalesced vs. strided memory access</li><li>Warp scheduling and latency hiding</li>",
+      cpuP:"The OpenMP loop on a toy CPU with 4 cores × 2 hardware threads.",
+      cpuL:"<li>Fork / join and private vs. shared data</li><li>collapse(2), static vs. dynamic schedule</li><li>Cache lines, prefetching and SIMD</li><li>Load imbalance at the implicit barrier</li>",
+      foot:'By <a href="https://carlosb.dev/">Carlos Ballesteros</a> · source code on <a href="https://github.com/CABA1998/Brusselator">GitHub</a>.'},
+    es:{eyebrow:"Brusselator de reacción-difusión · Forward Euler · stencil de 5 puntos",h1a:"Un solver de EDP, en una",h1b:"y en una",
+      lead:"Dos simulaciones interactivas, paso a paso, del mismo solver en C++. Sigue un nodo de la malla desde la memoria hasta las unidades aritméticas y de vuelta, y mira por qué cada máquina es rápida donde lo es.",
+      steps:"pasos",open:"Abrir simulación →",
+      gpuP:"El kernel CUDA en una GPU de juguete con 2 multiprocesadores (SMs).",
+      gpuL:"<li>Copias host ↔ device por PCIe</li><li>Grid, bloques, warps y lanes</li><li>Acceso a memoria coalescido o disperso</li><li>Planificación de warps y ocultación de latencia</li>",
+      cpuP:"El bucle OpenMP en una CPU de juguete con 4 núcleos × 2 hilos hardware.",
+      cpuL:"<li>Fork / join y datos privados o compartidos</li><li>collapse(2), schedule static o dynamic</li><li>Líneas de caché, prefetching y SIMD</li><li>Desbalance de carga en la barrera implícita</li>",
+      foot:'Por <a href="https://carlosb.dev/">Carlos Ballesteros</a> · código fuente en <a href="https://github.com/CABA1998/Brusselator">GitHub</a>.'}
+  };
+  var lang;
+  try{lang=localStorage.getItem("cm-lang");}catch(e){}
+  if(lang!=="en"&&lang!=="es") lang=(navigator.language||"en").toLowerCase().indexOf("es")===0?"es":"en";
+  function render(){
+    document.documentElement.lang=lang;
+    document.querySelectorAll("[data-i]").forEach(function(e){e.innerHTML=T[lang][e.getAttribute("data-i")];});
+    document.getElementById("lang").textContent=lang==="es"?"EN":"ES";
+  }
+  document.getElementById("lang").onclick=function(){lang=lang==="es"?"en":"es";try{localStorage.setItem("cm-lang",lang);localStorage.setItem("om-lang",lang);}catch(e){}render();};
+  render();
+})();
+</script>
+</body>
+</html>
